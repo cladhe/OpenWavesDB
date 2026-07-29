@@ -739,6 +739,19 @@ tr.back-row:hover td{background:rgba(240,196,138,0.14);}
 }
 .report-box a.report-btn:hover{background:rgba(167,205,242,0.18);border-color:var(--active-blue);}
 
+.powered-by{
+  max-width:1180px;
+  margin:0 auto;
+  padding:24px 24px 40px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  color:var(--muted);
+  font-size:12.5px;
+}
+.powered-by img{display:block;height:32px;width:auto;}
+
 /* ---------- COMMUNITY / DOC PAGE (community.html) ---------- */
 .doc-header{
   max-width:760px;
