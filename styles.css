@@ -371,6 +371,10 @@ td.station{font-weight:600;}
   transform:none;
   margin:18px auto 0;
 }
+.pagination.pending{
+  opacity:0;
+  pointer-events:none;
+}
 .pagination[hidden]{display:none;}
 .pagination-range{
   font-size:11.5px;

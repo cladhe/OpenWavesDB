@@ -91,6 +91,7 @@
   <div class="count-pill">UTC now: <b id="utcClock">--:--</b></div>
 </div>
 
+<div id="paginationStartAnchor"></div>
 <div class="table-wrap">
   <div class="table-scroll">
     <table id="freqTable">
@@ -1243,11 +1244,17 @@ document.getElementById('pageNext').addEventListener('click', () => {
 // on scroll-adjacent events.
 const paginationEl = document.getElementById('pagination');
 const paginationAnchorEl = document.getElementById('paginationAnchor');
+// The bar only starts floating once the filter bar above the table has scrolled out of
+// the way; otherwise, at scrollY 0, a fixed-bottom bar has nothing to "float over" yet and
+// just sits on top of the search/filter controls (visible on deployment before any scrolling).
+const paginationStartAnchorEl = document.getElementById('paginationStartAnchor');
 let dockCheckQueued = false;
 function checkPaginationDock(){
   dockCheckQueued = false;
   const top = paginationAnchorEl.getBoundingClientRect().top;
+  const pastStart = paginationStartAnchorEl.getBoundingClientRect().bottom <= 0;
   paginationEl.classList.toggle('docked', top <= window.innerHeight);
+  paginationEl.classList.toggle('pending', !pastStart);
 }
 function scheduleDockCheck(){
   if(dockCheckQueued) return;
