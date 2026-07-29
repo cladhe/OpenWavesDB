@@ -1,6 +1,6 @@
 // Pure, DOM-free helpers for the frequency detail modal and the mobile column
-// whitelist. Loaded via <script src="scripts/lib/radio-detail.js"> in the
-// browser (functions become globals, same as the database-*.js files) and via
+// whitelist. Loaded via <script src="radio-detail.js"> in the browser
+// (functions become globals, same as the database-*.js files) and via
 // require() from radio-detail.test.js.
 
 function formatSchedule(start, end) {
@@ -49,6 +49,59 @@ function computeMobileHiddenColumns(allColumns, mobileColumns) {
   return allColumns.filter(c => !keep.has(c));
 }
 
+// Where a bounded (non-24h, non-variable) schedule stands right now, in UTC minutes-of-day.
+// Handles schedules that wrap past midnight (e.g. start 1950, end 1800) the same way
+// isActiveNow() does elsewhere in the page: "on" runs from start for `duration` minutes,
+// wrapping into the next day if end <= start.
+function computeScheduleStatus(nowMinutes, startMinutes, endMinutes) {
+  const DAY = 1440;
+  const duration = (((endMinutes - startMinutes) % DAY) + DAY) % DAY || DAY;
+  const elapsed = (((nowMinutes - startMinutes) % DAY) + DAY) % DAY;
+  if (elapsed < duration) {
+    return { state: 'on', minutesSinceStart: elapsed, minutesUntilEnd: duration - elapsed, progress: elapsed / duration };
+  }
+  return { state: 'off', minutesUntilStart: DAY - elapsed };
+}
+
+function formatDuration(totalMinutes) {
+  const m = Math.max(0, Math.round(totalMinutes));
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  if (h === 0) return `${mm}min`;
+  if (mm === 0) return `${h}h`;
+  return `${h}h ${mm}min`;
+}
+
+// Moves `item` to the front of `list` (adding it if it isn't already present), dedup'd by
+// `keyFn`, and caps the result at `maxLen`. Used for the recent-airport-searches list: searching
+// the same airport again just brings its existing entry back to the top instead of duplicating it.
+function upsertMostRecent(list, item, keyFn, maxLen) {
+  const key = keyFn(item);
+  const filtered = list.filter(x => keyFn(x) !== key);
+  filtered.unshift(item);
+  if (filtered.length > maxLen) filtered.length = maxLen;
+  return filtered;
+}
+
+function removeByKey(list, key, keyFn) {
+  return list.filter(x => keyFn(x) !== key);
+}
+
+// Add/remove toggle keyed by `keyFn`: if an item with the same key is already in `list`, it's
+// removed (toggled off); otherwise `item` is appended (toggled on). Used for starring/unstarring
+// a frequency from its detail view.
+function toggleInList(list, item, keyFn) {
+  const key = keyFn(item);
+  const idx = list.findIndex(x => keyFn(x) === key);
+  if (idx === -1) return { list: [...list, item], added: true };
+  const next = list.slice();
+  next.splice(idx, 1);
+  return { list: next, added: false };
+}
+
 if (typeof module !== 'undefined') {
-  module.exports = { formatSchedule, lookupClassDef, renderClassDefs, buildDescription, computeMobileHiddenColumns };
+  module.exports = {
+    formatSchedule, lookupClassDef, renderClassDefs, buildDescription, computeMobileHiddenColumns,
+    computeScheduleStatus, formatDuration, upsertMostRecent, removeByKey, toggleInList,
+  };
 }

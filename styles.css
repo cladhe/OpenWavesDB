@@ -18,6 +18,7 @@
   --active-blue:#a7cdf2;
   --green:#a9dbc0;
   --pink:#c9bdf0;
+  --yellow:#f0e29e;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
@@ -137,6 +138,24 @@ h1 .accent{color:var(--amber);}
   color:var(--muted);
   font-size:12.5px;
 }
+.recent-item{
+  display:flex;
+  align-items:center;
+  gap:4px;
+}
+.recent-item .band-option{flex:1 1 auto;}
+.recent-remove{
+  flex:0 0 auto;
+  background:none;
+  border:none;
+  color:var(--muted);
+  font-size:16px;
+  line-height:1;
+  padding:6px 10px;
+  cursor:pointer;
+  border-radius:8px;
+}
+.recent-remove:hover{color:var(--pink);background:rgba(201,189,240,0.12);}
 .country-suffix{
   font-size:0.4em;
   align-items:baseline;
@@ -232,6 +251,11 @@ svg.ruler{width:100%;height:auto;display:block;}
   max-width:1180px;
   margin:24px auto 64px;
   padding:0 24px;
+}
+/* Horizontal scroll lives on this inner wrapper (not .table-wrap itself), because an
+   overflow other than visible on .table-wrap would turn it into a scroll container and
+   break the sticky pagination bar's ability to stick to the actual browser viewport. */
+.table-scroll{
   overflow-x:auto;
 }
 table{
@@ -318,6 +342,65 @@ td.station{font-weight:600;}
   color:var(--muted);
   font-size:13.5px;
 }
+/* Floats fixed at the bottom-center of the viewport (like a picker bar) while there's more
+   table below/around it to page through. A tiny zero-height #paginationAnchor sits right where
+   this bar would naturally fall in the document; once that point scrolls into view (or past),
+   JS adds .docked, which drops it out of "fixed" and lets it settle into normal flow there
+   instead of continuing to float over the legend/footer. */
+.pagination{
+  position:fixed;
+  left:50%;
+  bottom:16px;
+  transform:translateX(-50%);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  width:fit-content;
+  padding:10px 20px;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  border-radius:999px;
+  box-shadow:0 12px 30px rgba(0,0,0,0.35);
+  z-index:50;
+}
+.pagination.docked{
+  position:static;
+  left:auto;
+  transform:none;
+  margin:18px auto 0;
+}
+.pagination[hidden]{display:none;}
+.pagination-range{
+  font-size:11.5px;
+  color:var(--muted);
+  white-space:nowrap;
+}
+.pagination-controls{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:16px;
+}
+.pagination button{
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  font-family:inherit;
+  font-size:13px;
+  font-weight:600;
+  padding:8px 16px;
+  border-radius:999px;
+  cursor:pointer;
+}
+.pagination button:hover:not(:disabled){border-color:var(--signal);color:var(--signal);}
+.pagination button:disabled{opacity:0.4;cursor:default;}
+.pagination span{
+  font-size:12.5px;
+  color:var(--muted);
+  font-variant-numeric:tabular-nums;
+}
 
 /* ---------- LEGEND / FOOTER ---------- */
 .legend{
@@ -397,6 +480,22 @@ footer a{color:var(--signal);}
   cursor:pointer;
 }
 .modal-close:hover{color:var(--signal);border-color:var(--signal);}
+.modal-star{
+  position:absolute;
+  top:16px;
+  right:56px;
+  width:32px;
+  height:32px;
+  border-radius:50%;
+  border:1px solid var(--line);
+  background:var(--panel-2);
+  color:var(--muted);
+  font-size:17px;
+  line-height:1;
+  cursor:pointer;
+}
+.modal-star:hover{color:var(--amber);border-color:var(--amber);}
+.modal-star.is-fav{color:var(--amber);border-color:var(--amber);}
 .modal-freq{
   font-size:42px;
   font-weight:800;
@@ -413,6 +512,45 @@ footer a{color:var(--signal);}
   text-transform:uppercase;
   letter-spacing:.06em;
   margin-top:6px;
+}
+.modal-schedule-wrap{margin-top:6px;}
+.modal-schedule-main{
+  font-size:14px;
+  font-weight:700;
+}
+.modal-schedule-sub{
+  font-size:12.5px;
+  font-weight:600;
+  margin-top:2px;
+}
+.modal-schedule-blue{color:var(--active-blue);}
+.modal-schedule-orange{color:var(--amber);}
+.modal-schedule-yellow{color:var(--yellow);}
+.modal-seekbar{
+  position:relative;
+  height:6px;
+  border-radius:999px;
+  background:var(--line);
+  margin-top:10px;
+}
+.modal-seekbar-fill{
+  position:absolute;
+  top:0;
+  left:0;
+  height:100%;
+  border-radius:999px;
+  background:var(--amber);
+}
+.modal-seekbar-cursor{
+  position:absolute;
+  top:50%;
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  background:var(--amber);
+  border:2px solid var(--panel);
+  box-shadow:0 0 0 2px var(--line);
+  transform:translate(-50%,-50%);
 }
 .modal-title{
   font-size:22px;
@@ -452,3 +590,72 @@ footer a{color:var(--signal);}
   color:var(--text);
 }
 tbody tr{cursor:pointer;}
+
+/* ---------- COOKIE BANNER ---------- */
+.cookie-banner{
+  position:fixed;
+  left:16px;
+  right:16px;
+  bottom:16px;
+  max-width:640px;
+  margin:0 auto;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:14px;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  border-radius:14px;
+  box-shadow:0 16px 40px rgba(0,0,0,0.35);
+  padding:16px 18px;
+  z-index:200;
+}
+.cookie-banner[hidden]{display:none;}
+.cookie-banner span{
+  flex:1 1 260px;
+  font-size:13px;
+  line-height:1.5;
+  color:var(--text);
+}
+.cookie-banner-actions{
+  flex:0 0 auto;
+  display:flex;
+  gap:10px;
+}
+.cookie-banner-actions button{
+  font-family:inherit;
+  font-size:13px;
+  font-weight:700;
+  padding:9px 18px;
+  border-radius:999px;
+  cursor:pointer;
+}
+.cookie-btn-primary{
+  background:var(--amber);
+  border:none;
+  color:#20212a;
+}
+.cookie-btn-primary:hover{opacity:0.9;}
+.cookie-btn-secondary{
+  background:none;
+  border:1px solid var(--line);
+  color:var(--text);
+}
+.cookie-btn-secondary:hover{border-color:var(--muted);color:var(--muted);}
+
+.cookies-reopen-btn{
+  position:fixed;
+  top:16px;
+  right:16px;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  color:var(--muted);
+  font-family:inherit;
+  font-size:12.5px;
+  font-weight:600;
+  padding:8px 16px;
+  border-radius:999px;
+  cursor:pointer;
+  z-index:150;
+}
+.cookies-reopen-btn:hover{color:var(--signal);border-color:var(--signal);}

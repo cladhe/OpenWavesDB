@@ -4,7 +4,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Shortwave Log: Active Frequencies</title>
+<title>Radio Frequency Database: Shortwave, AM, FM & Airband</title>
+<meta name="description" content="A live, searchable database of radio frequencies worldwide, covering shortwave, AM, FM, and airband. Sortable by station, schedule, and more.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="preload" href="Manrope/Manrope-VariableFont_wght.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="database-shortwave.js" as="script">
+<link rel="preload" href="database-longwave.js" as="script">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Radio Frequency Database: Shortwave, AM, FM & Airband">
+<meta property="og:description" content="A live, searchable database of radio frequencies worldwide, covering shortwave, AM, FM, and airband. Sortable by station, schedule, and more.">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Radio Frequency Database: Shortwave, AM, FM & Airband">
+<meta name="twitter:description" content="A live, searchable database of radio frequencies worldwide, covering shortwave, AM, FM, and airband. Sortable by station, schedule, and more.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Radio Frequency Database",
+  "description": "A live, searchable database of radio frequencies worldwide, covering shortwave, AM, FM, and airband. Sortable by station, schedule, and more.",
+  "applicationCategory": "UtilitiesApplication"
+}
+</script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -67,17 +87,29 @@
     <option value="">All classes</option>
   </select>
   <div class="count-pill"><b id="rowCount">0</b> entries shown</div>
+  <div class="count-pill"><b id="entriesAvailable">0</b> entries available</div>
   <div class="count-pill">UTC now: <b id="utcClock">--:--</b></div>
 </div>
 
 <div class="table-wrap">
-  <table id="freqTable">
-    <thead>
-      <tr id="tableHeadRow"></tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-  </table>
+  <div class="table-scroll">
+    <table id="freqTable">
+      <thead>
+        <tr id="tableHeadRow"></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
   <div class="no-results" id="noResults" style="display:none;">No frequencies match your filters.</div>
+  <div id="paginationAnchor"></div>
+  <div class="pagination" id="pagination" hidden>
+    <div class="pagination-range" id="pageRangeLabel"></div>
+    <div class="pagination-controls">
+      <button type="button" id="pagePrev">‹ Prev</button>
+      <span id="pageInfo"></span>
+      <button type="button" id="pageNext">Next ›</button>
+    </div>
+  </div>
 </div>
 
 <div class="legend">
@@ -108,16 +140,217 @@
 
 <div class="modal-backdrop" id="modalBackdrop" hidden></div>
 <div class="modal" id="detailModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+  <button type="button" class="modal-star" id="modalStar" aria-label="Toggle favorite">☆</button>
   <button type="button" class="modal-close" id="modalClose" aria-label="Close">&times;</button>
   <div class="modal-content" id="modalContent"></div>
 </div>
 
+<button type="button" class="cookies-reopen-btn" id="cookiesReopenBtn" aria-label="Cookie settings">Cookies</button>
+
+<div class="cookie-banner" id="cookieBanner" hidden>
+  <span>This site uses a few cookies to remember your favorites, recent airport searches, and
+    where you left off. Nothing is tracked or shared. You can change your mind anytime with the
+    "Cookies" button in the top right.</span>
+  <div class="cookie-banner-actions">
+    <button type="button" id="cookieDeny" class="cookie-btn-secondary">Deny</button>
+    <button type="button" id="cookieAccept" class="cookie-btn-primary">Accept</button>
+  </div>
+</div>
+
 <script src="database-shortwave.js"></script>
 <script src="database-longwave.js"></script>
-<script src="database-mediumwave.js"></script>
-<script src="database-fm.js"></script>
 <script src="radio-detail.js"></script>
 <script>
+// ---------- cookies ----------
+// Plain first-party cookies, used only to remember this browser's own preferences
+// (favorites, recent airport searches, last band/country/region viewed). Nothing is sent
+// anywhere or shared; it's just local persistence that happens to survive a refresh.
+function setCookie(name, value, days){
+  const maxAge = days ? `; max-age=${days * 24 * 60 * 60}` : '';
+  document.cookie = `${name}=${encodeURIComponent(value)}${maxAge}; path=/; SameSite=Lax`;
+}
+function getCookie(name){
+  const escaped = name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1');
+  const match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+function deleteCookie(name){
+  document.cookie = `${name}=; max-age=0; path=/`;
+}
+// The consent choice itself is the one cookie that's always kept (it's what remembers you said
+// no to the rest). Every other cookie below is gated behind this and won't be written at all
+// while denied.
+function cookiesAllowed(){
+  return getCookie('cookieConsent') === 'accepted';
+}
+
+// ---------- favorites ----------
+// Stored compactly as an array of arrays (not objects) to keep the cookie small. Each entry
+// snapshots the row as it was when starred, plus which band it came from, so a favorite still
+// displays and opens its detail view correctly even for a lazy band (Airband) that hasn't
+// loaded this session, and even if the underlying data file changes in a later update.
+const FAVORITE_FIELDS = ['bandId','bandLabel','freqUnit','freq','station','name','site','lang','target','cls','start','end','info'];
+
+function loadFavorites(){
+  const raw = getCookie('favorites');
+  if(!raw) return [];
+  try{
+    return JSON.parse(raw).map(arr => {
+      const obj = {};
+      FAVORITE_FIELDS.forEach((k, i) => { obj[k] = arr[i]; });
+      return obj;
+    });
+  } catch(e){ return []; }
+}
+function saveFavorites(favs){
+  if(!cookiesAllowed()) return;
+  setCookie('favorites', JSON.stringify(favs.map(f => FAVORITE_FIELDS.map(k => f[k] !== undefined ? f[k] : ''))), 365);
+}
+function favoriteKey(bandId, freq, station){
+  return `${bandId}|${freq}|${station}`;
+}
+function isFavorited(bandId, freq, station){
+  const key = favoriteKey(bandId, freq, station);
+  return loadFavorites().some(f => favoriteKey(f.bandId, f.freq, f.station) === key);
+}
+// Toggles a favorite and returns whether it's now favorited (true) or was just removed (false).
+function toggleFavorite(originBand, row){
+  const record = {
+    bandId: originBand.id, bandLabel: originBand.label,
+    freqUnit: originBand.freqUnit || originBand.rulerUnit || 'kHz',
+    freq: row.freq, station: row.station, name: row.name || '',
+    site: row.site || '—', lang: row.lang || '—', target: row.target || '—',
+    cls: row.cls || '—', start: row.start, end: row.end, info: row.info || '',
+  };
+  const result = toggleInList(loadFavorites(), record, f => favoriteKey(f.bandId, f.freq, f.station));
+  saveFavorites(result.list);
+  if(currentBand.id === 'favorites'){ rebuildFavoritesData(); render(); }
+  return result.added;
+}
+function rebuildFavoritesData(){
+  const favBand = BAND_REGISTRY.find(b => b.id === 'favorites');
+  favBand.data = loadFavorites().map(f => ({
+    freq: f.freq, station: f.station, name: f.name, site: f.site, lang: f.lang,
+    target: f.target, cls: f.cls, start: f.start, end: f.end, info: f.info,
+    _origBand: f.bandId, _origBandLabel: f.bandLabel, _freqUnit: f.freqUnit,
+  }));
+}
+
+// ---------- recent airport searches (Airband only) ----------
+function loadRecentAirports(){
+  const raw = getCookie('recentAirports');
+  if(!raw) return [];
+  try{ return JSON.parse(raw).map(a => ({ id: a[0], label: a[1] })); } catch(e){ return []; }
+}
+function saveRecentAirports(list){
+  if(!cookiesAllowed()) return;
+  setCookie('recentAirports', JSON.stringify(list.map(r => [r.id, r.label])), 365);
+}
+function recordRecentAirport(region){
+  saveRecentAirports(upsertMostRecent(loadRecentAirports(), { id: region.id, label: region.label }, r => r.id, 10));
+}
+function removeRecentAirport(id){
+  saveRecentAirports(removeByKey(loadRecentAirports(), id, r => r.id));
+}
+
+// ---------- "where you left off" (band / country / region) ----------
+function saveSiteState(){
+  if(!cookiesAllowed()) return;
+  setCookie('siteState', JSON.stringify([
+    currentBand.id,
+    currentCountry ? currentCountry.id : '',
+    currentRegion ? currentRegion.id : '',
+  ]), 365);
+}
+function loadSiteState(){
+  const raw = getCookie('siteState');
+  if(!raw) return null;
+  try{
+    const [bandId, countryId, regionId] = JSON.parse(raw);
+    return { bandId, countryId, regionId };
+  } catch(e){ return null; }
+}
+let pendingRestoreRegionId = null;
+
+// Shared by both restore paths below: switches to the given band/country/region. Airband's
+// region list only exists after its lazy script loads, so that part of the restore is finished
+// inside loadBandScript()'s onload via `pendingRestoreRegionId` instead of happening here directly.
+function applyRestoredState(bandId, countryId, regionId){
+  if(!bandId || bandId === currentBand.id) return;
+  const band = BAND_REGISTRY.find(b => b.id === bandId);
+  if(!band) return;
+
+  pendingRestoreRegionId = regionId || null;
+  setBand(band.id);
+
+  if(currentBand.countries && countryId && currentCountry && currentCountry.id !== countryId){
+    setCountry(countryId);
+  }
+  if(!(band.lazy && !band.loaded) && pendingRestoreRegionId && currentCountry && currentCountry.regions){
+    const id = pendingRestoreRegionId;
+    pendingRestoreRegionId = null;
+    if(currentCountry.regions.some(r => r.id === id)) setRegion(id);
+  }
+}
+
+// Called once at the bottom of this script, after the default Shortwave view has already
+// bootstrapped. If a previous visit left a different band/country/region behind, switches
+// straight to it so a refresh doesn't always dump you back on Shortwave.
+function restoreSiteState(){
+  const saved = loadSiteState();
+  if(!saved) return;
+  applyRestoredState(saved.bandId, saved.countryId, saved.regionId);
+}
+
+// A shared link (e.g. ?band=fm&country=france, or ?airport=JFK) always wins over the "where you
+// left off" cookie, since opening that link is a more specific, explicit signal of what someone
+// wants to see. Returns true if the URL actually specified a (valid) band, so the caller knows
+// whether to fall back to the cookie-based restore instead.
+function restoreFromUrl(){
+  const params = new URLSearchParams(location.search);
+  // Airband only ever has one "country" (the fixed "all" entry), so a shared airport link skips
+  // straight to band/region and reads as ?airport=CODE instead of the generic
+  // ?band=airband&country=all&region=CODE.
+  const airport = params.get('airport');
+  if(airport){
+    applyRestoredState('airband', '', airport);
+    return true;
+  }
+  const bandId = params.get('band');
+  if(!bandId || !BAND_REGISTRY.some(b => b.id === bandId)) return false;
+  applyRestoredState(bandId, params.get('country') || '', params.get('region') || '');
+  return true;
+}
+
+// Keeps the address bar in sync with whatever's currently on screen, so the URL is always
+// shareable/bookmarkable as a direct link back to this exact band/country/region. Uses
+// replaceState (not pushState) so switching bands/filters doesn't spam the browser's back button.
+function updateUrlParams(){
+  const params = new URLSearchParams();
+  if(currentBand.id === 'airband' && currentRegion && currentRegion.id){
+    params.set('airport', currentRegion.id);
+  } else {
+    params.set('band', currentBand.id);
+    if(currentCountry && currentCountry.id) params.set('country', currentCountry.id);
+    if(currentRegion && currentRegion.id) params.set('region', currentRegion.id);
+  }
+  history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
+}
+
+function persistState(){
+  saveSiteState();
+  updateUrlParams();
+}
+
+function showCookieBanner(){
+  document.getElementById('cookieBanner').hidden = false;
+  updatePaginationOffset();
+}
+function initCookieBanner(){
+  if(getCookie('cookieConsent')) return;
+  showCookieBanner();
+}
+
 const BAND_REGISTRY = [
   {
     id: "sw",
@@ -178,8 +411,15 @@ const BAND_REGISTRY = [
   {
     id: "mw",
     label: "Mediumwave (AM)",
-    data: DATA_MW,
-    bands: BANDS_MW,
+    lazy: true,
+    scriptSrc: "database-mediumwave.js",
+    loaded: false,
+    data: [],
+    bands: [],
+    onReady: (band) => {
+      band.data = DATA_MW;
+      band.bands = BANDS_MW;
+    },
     columns: ["freq","station","site","class","start","end","info"],
     mobileColumns: ["freq","station","site"],
     filters: { band: false, lang: false, class: true, country: true },
@@ -197,12 +437,15 @@ const BAND_REGISTRY = [
       { id: "australia", label: "Australia", value: "Australia" },
     ],
     subHtml: (country) => {
-      const usaCount = DATA_MW.filter(d => d.country === "USA").length;
-      const caCount = DATA_MW.filter(d => d.country === "Canada").length;
-      const ukCount = DATA_MW.filter(d => d.country === "United Kingdom").length;
-      const deCount = DATA_MW.filter(d => d.country === "Germany").length;
-      const mxCount = DATA_MW.filter(d => d.country === "Mexico").length;
-      const auCount = DATA_MW.filter(d => d.country === "Australia").length;
+      if(!currentBand.data.length){
+        return `Loading Mediumwave data…`;
+      }
+      const usaCount = currentBand.data.filter(d => d.country === "USA").length;
+      const caCount = currentBand.data.filter(d => d.country === "Canada").length;
+      const ukCount = currentBand.data.filter(d => d.country === "United Kingdom").length;
+      const deCount = currentBand.data.filter(d => d.country === "Germany").length;
+      const mxCount = currentBand.data.filter(d => d.country === "Mexico").length;
+      const auCount = currentBand.data.filter(d => d.country === "Australia").length;
       const common = `Unlike shortwave, domestic AM stations don't have an international "target" or a
         multi-language time-slot schedule. Most just run one format all day for a local audience, so
         those columns read "—" here. Day and night power differs for many stations (a rule meant to
@@ -258,7 +501,7 @@ const BAND_REGISTRY = [
           same site were collapsed into a single entry. ${common}`;
       }
       return `Every currently licensed or operational AM station across the United States, Canada, the
-        United Kingdom, Germany, Mexico and Australia: ${DATA_MW.length.toLocaleString()} entries
+        United Kingdom, Germany, Mexico and Australia: ${currentBand.data.length.toLocaleString()} entries
         (${usaCount.toLocaleString()} US, ${caCount.toLocaleString()} Canada, ${ukCount.toLocaleString()}
         UK, ${deCount.toLocaleString()} Germany, ${mxCount.toLocaleString()} Mexico,
         ${auCount.toLocaleString()} Australia), pulled directly from the FCC's AM Query, ISED's
@@ -305,8 +548,15 @@ const BAND_REGISTRY = [
   {
     id: "fm",
     label: "FM",
-    data: DATA_FM,
-    bands: BANDS_FM,
+    lazy: true,
+    scriptSrc: "database-fm.js",
+    loaded: false,
+    data: [],
+    bands: [],
+    onReady: (band) => {
+      band.data = DATA_FM;
+      band.bands = BANDS_FM;
+    },
     columns: ["freq","station","site","class","start","end","info"],
     mobileColumns: ["freq","station","site"],
     filters: { band: false, lang: false, class: true, country: true, region: true },
@@ -362,9 +612,12 @@ const BAND_REGISTRY = [
       ] },
     ],
     subHtml: (country, region) => {
+      if(!currentBand.data.length){
+        return `Loading FM data…`;
+      }
       if(country.id === "mexico"){
         if(!region || !region.id){
-          const n = DATA_FM.filter(d => d.country === "Mexico").length;
+          const n = currentBand.data.filter(d => d.country === "Mexico").length;
           return `Every FM station registered with Mexico's IFT (Instituto Federal de
             Telecomunicaciones): ${n.toLocaleString()} stations nationwide, pulled directly from IFT's
             official "Infraestructura de Estaciones FM" register. Many of these are simulcast or
@@ -374,7 +627,7 @@ const BAND_REGISTRY = [
             "Mexico" to narrow this down to one of 20 major cities, or leave it on "All Mexico" to browse
             the full national list.`;
         }
-        const n = DATA_FM.filter(d => d.region === region.id).length;
+        const n = currentBand.data.filter(d => d.region === region.id).length;
         return `Every FM station in ${region.label}: ${n.toLocaleString()} stations, pulled directly
           from IFT's official "Infraestructura de Estaciones FM" register (no third-party cross-checking
           needed here, unlike France, since IFT's own register already includes the city). Many of these
@@ -382,7 +635,7 @@ const BAND_REGISTRY = [
           column). Switch back to "All Mexico" in the region picker to see the full national list.`;
       }
       if(!region || !region.id){
-        const n = DATA_FM.filter(d => d.country === "France").length;
+        const n = currentBand.data.filter(d => d.country === "France").length;
         return `Every FM station across every French region covered here: ${n.toLocaleString()}
           stations, sourced from ARCOM's (France's broadcast regulator) public transmitter database,
           cross-checked against independent per-city frequency directories for each region's
@@ -390,9 +643,9 @@ const BAND_REGISTRY = [
           leave it on "All France" to browse everything covered so far. More regions of France are being
           added over time.`;
       }
-      const n = DATA_FM.filter(d => d.region === region.id).length;
+      const n = currentBand.data.filter(d => d.region === region.id).length;
       return `Every FM station receivable in ${region.label}: ${n.toLocaleString()} stations across
-        ${new Set(DATA_FM.filter(d => d.region === region.id).map(d => d.freq)).size} frequencies,
+        ${new Set(currentBand.data.filter(d => d.region === region.id).map(d => d.freq)).size} frequencies,
         sourced from ARCOM's (France's broadcast regulator) public transmitter database, cross-checked
         against independent frequency directories for the region-specific assignments. A handful of
         frequencies are legitimately time-shared between two or three associative stations (see the
@@ -491,7 +744,7 @@ const BAND_REGISTRY = [
       { code: "TWR", bold: "TWR", label: "Tower", desc: "Airport traffic control tower, handling local and runway control." },
       { code: "GND", bold: "GND", label: "Ground", desc: "Surface movement control, covering taxiway and ramp movement (called SMGCS, SMC, GMC, or \"Apron Management\" in various countries)." },
       { code: "CD", bold: "CD", label: "Clearance delivery", desc: "IFR clearance readback before taxi." },
-      { code: "APP", bold: "APP", label: "Approach control", desc: "Includes each country's own radar, terminal-area, and precision-approach variants (Radar, TAR, SRE, GCA, PAR, TMA) folded into this one class. Not published per-airport in Brazil's or Portugal's AIP for some airports." },
+      { code: "APP", bold: "APP", label: "Approach control", desc: "Includes each country's own radar, terminal-area, and precision-approach variants (Radar, TAR, SRE, GCA, PAR, TMA) folded into this one class." },
       { code: "DEP", bold: "DEP", label: "Departure control", desc: "Includes named departure-procedure frequencies (US only)." },
       { code: "ATIS", bold: "ATIS", label: "Automated Terminal Information Service", desc: "Recorded field conditions, including digital D-ATIS and split arrival/departure ATIS in the UK." },
       { code: "AFIS", bold: "AFIS", label: "Aerodrome Flight Information Service", desc: "Traffic and information only, not a full ATC clearance authority." },
@@ -583,12 +836,6 @@ const BAND_REGISTRY = [
       military UHF frequencies (225–400 MHz, a physically different band from civil VHF airband, used at
       joint-use military/civil fields). All entries are shown as continuously available, since published
       operating hours are inconsistent free text in the source and aren't force-fit into a schedule here.
-      <br><br>A few countries were looked into and found not viable for this table with an honest,
-      official-only source: <b>Germany</b> (DFS's real AIP needs an internal-network or paid third-party
-      login, and its free Basic VFR AIP is chart/image-based rather than structured data), <b>Italy</b>
-      and <b>Switzerland</b> (both login/paywall-gated), and several others that hit similar login walls
-      or only publish PDF charts rather than structured tables. If you have access to any of these
-      through another channel, send the export over and it can be added.
       <br><br>Beyond those 16 official sources, this table is supplemented with
       <a href="https://ourairports.com/data/" target="_blank" rel="noopener">OurAirports</a>'
       public-domain (Unlicense) community-contributed frequency data for airports and countries outside
@@ -596,6 +843,30 @@ const BAND_REGISTRY = [
       rest of this table is, so treat those specific entries with an appropriate grain of salt. In the
       very rare case where the same short code is shared by two entirely different real-world airports,
       each is listed as its own entry with its country shown in the label so they can be told apart.`
+  },
+  {
+    id: "favorites",
+    label: "Favorites",
+    data: [],
+    bands: [],
+    columns: ["freq","station","band","site","start","end","info"],
+    mobileColumns: ["freq","station","band"],
+    filters: { band: false, lang: false, class: false, country: false },
+    rulerMin: 0,
+    rulerMax: 1,
+    rulerScale: "linear",
+    dialLabel: "Your starred frequencies",
+    subHtml: () => {
+      const n = (BAND_REGISTRY.find(b => b.id === "favorites").data || []).length;
+      if(!n){
+        return `You haven't starred anything yet. Open any frequency's detail view and tap the star
+          to save it here.`;
+      }
+      return `Your starred frequencies: ${n.toLocaleString()} saved across every band. Tap a row for
+        the full detail view, or tap the star again from there to remove it.`;
+    },
+    footerHtml: `Favorites are stored in a cookie on this device, so they'll be here next time you visit
+      in this browser, but won't follow you to a different device or browser.`
   }
 ];
 
@@ -637,6 +908,7 @@ const COLUMN_DEFS = {
   start:   { label: "Start", sortKey: "start" },
   end:     { label: "End", sortKey: "end" },
   info:    { label: "Days / Info", sortKey: "info" },
+  band:    { label: "Band", sortKey: "_origBandLabel" },
 };
 
 function bandFor(freq){
@@ -676,6 +948,15 @@ function formatTime(hhmm){
 }
 
 function buildRuler(){
+  const dialWrap = document.querySelector('.dial-wrap');
+  if(!currentBand.bands.length){
+    // No meter/segment bands to plot (Favorites mixes rows from different bands and units,
+    // so there's no single meaningful scale to draw a ruler against).
+    dialWrap.style.display = 'none';
+    return;
+  }
+  dialWrap.style.display = '';
+
   const svg = document.querySelector('svg.ruler');
   let { rulerMin: min, rulerMax: max, bands: BANDS, data: DATA } = currentBand;
   let zoomedLabel = null;
@@ -798,6 +1079,8 @@ function buildTableHead(){
 
 let sortKey = 'freq', sortDir = 1;
 let lastRenderedRows = [];
+const PAGE_SIZE = 100;
+let currentPage = 1;
 
 function renderCell(colId, d, extra){
   const hideAttr = extra.hiddenCols.has(colId) ? ' data-mobile-hide' : '';
@@ -812,6 +1095,7 @@ function renderCell(colId, d, extra){
     case 'start': return `<td class="time" data-col="start"${hideAttr}>${extra.noFixedSchedule ? '—' : formatTime(d.start)}</td>`;
     case 'end': return `<td class="time" data-col="end"${hideAttr}>${extra.noFixedSchedule ? '—' : formatTime(d.end)}</td>`;
     case 'info': return `<td data-col="info"${hideAttr}>${d.info}</td>`;
+    case 'band': return `<td data-col="band"${hideAttr}>${d._origBandLabel}</td>`;
     default: return '<td></td>';
   }
 }
@@ -830,9 +1114,12 @@ function render(){
 
   const noSelectionYet = currentBand.requireRegion && !currentRegion;
 
+  // The haystack string is only built when there's actually a query to match against — for
+  // large bands (Mediumwave, Airband) building and lowercasing it for every row on every render,
+  // even with an empty search box, was pure wasted work. `!q ||` short-circuits past it entirely
+  // when there's nothing to search for.
   let rows = noSelectionYet ? [] : currentBand.data.filter(d => {
-    const haystack = [d.station, d.name || '', d.site, expandSiteForSearch(d.site), d.lang, d.target, d.cls, d.info].join(' ').toLowerCase();
-    const matchesQ = !q || haystack.includes(q) || String(d.freq).includes(q);
+    const matchesQ = !q || [d.station, d.name || '', d.site, expandSiteForSearch(d.site), d.lang, d.target, d.cls, d.info].join(' ').toLowerCase().includes(q) || String(d.freq).includes(q);
     const b = bandFor(d.freq);
     const matchesBand = !bandF || (b && b.name === bandF);
     const matchesLang = !langF || d.lang.split(/,\s*/).includes(langF);
@@ -855,10 +1142,18 @@ function render(){
     return 0;
   });
 
-  lastRenderedRows = rows;
+  // Only ever build DOM for one page's worth of rows. Some bands run to tens of thousands of
+  // matches (Airband, Mediumwave) — inserting all of them at once is what was blowing up paint
+  // and interaction timing; a fixed-size slice keeps every render() cheap regardless of band size.
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if(currentPage > totalPages) currentPage = totalPages;
+  if(currentPage < 1) currentPage = 1;
+  const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  lastRenderedRows = pageRows;
 
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = rows.map((d, i) => {
+  tbody.innerHTML = pageRows.map((d, i) => {
     const alwaysOn = isAlwaysOn(d);
     const active = isActiveNow(d);
     const extra = {
@@ -867,14 +1162,20 @@ function render(){
       noFixedSchedule: d.start === d.end,
       hiddenCols: hiddenColsSet,
     };
-    const band = bandFor(d.freq);
-    extra.bandTag = band ? `<span class="band-tag">${band.name}</span>` : '';
+    if(currentBand.id === 'favorites'){
+      extra.bandTag = d._freqUnit ? `<span class="band-tag">${d._freqUnit}</span>` : '';
+    } else {
+      const band = bandFor(d.freq);
+      extra.bandTag = band ? `<span class="band-tag">${band.name}</span>` : '';
+    }
     return `<tr data-idx="${i}" tabindex="0">${currentBand.columns.map(c => renderCell(c, d, extra)).join('')}</tr>`;
   }).join('');
 
-  document.getElementById('rowCount').textContent = rows.length;
+  document.getElementById('rowCount').textContent = pageRows.length;
+  document.getElementById('entriesAvailable').textContent = rows.length;
   document.getElementById('noResults').style.display = (rows.length || noSelectionYet) ? 'none' : 'block';
   document.getElementById('freqTable').style.display = rows.length ? 'table' : 'none';
+  updatePaginationControls(pageRows, rows.length, totalPages);
 
   document.querySelectorAll('#tableHeadRow th').forEach(th => {
     th.classList.toggle('sorted', th.dataset.key === sortKey);
@@ -886,22 +1187,108 @@ function render(){
   });
 }
 
+// What the range label above the Prev/Next buttons calls each column, and how it reads a
+// representative value off a row for that column. Keyed by the same sortKey used for the
+// table's own sort, so the label always matches whatever the user last sorted by.
+const SORT_RANGE_LABELS = {
+  freq:            { label: 'frequency', format: d => d.freq.toFixed(d.freq % 1 ? 1 : 0), unit: true },
+  station:         { label: 'stations', format: d => d.station },
+  site:            { label: 'sites', format: d => d.site },
+  lang:            { label: 'languages', format: d => d.lang },
+  target:          { label: 'targets', format: d => d.target },
+  cls:             { label: 'classes', format: d => d.cls },
+  start:           { label: 'start times', format: d => formatTime(d.start) },
+  end:             { label: 'end times', format: d => formatTime(d.end) },
+  info:            { label: 'info', format: d => d.info },
+  _origBandLabel:  { label: 'bands', format: d => d._origBandLabel },
+};
+
+function buildPageRangeLabel(pageRows){
+  if(!pageRows.length) return '';
+  const cfg = SORT_RANGE_LABELS[sortKey] || SORT_RANGE_LABELS.freq;
+  const first = cfg.format(pageRows[0]);
+  const last = cfg.format(pageRows[pageRows.length - 1]);
+  const unit = cfg.unit ? ` ${currentBand.freqUnit || currentBand.rulerUnit || 'kHz'}` : '';
+  const range = first === last ? `${first}` : `${first} to ${last}`;
+  return `Showing ${cfg.label} ${range}${unit}`;
+}
+
+function updatePaginationControls(pageRows, totalRows, totalPages){
+  const pag = document.getElementById('pagination');
+  if(totalRows <= PAGE_SIZE){
+    pag.hidden = true;
+    return;
+  }
+  pag.hidden = false;
+  document.getElementById('pageRangeLabel').textContent = buildPageRangeLabel(pageRows);
+  const start = totalRows ? (currentPage - 1) * PAGE_SIZE + 1 : 0;
+  const end = Math.min(currentPage * PAGE_SIZE, totalRows);
+  document.getElementById('pageInfo').textContent = `${start.toLocaleString()}–${end.toLocaleString()} of ${totalRows.toLocaleString()}`;
+  document.getElementById('pagePrev').disabled = currentPage <= 1;
+  document.getElementById('pageNext').disabled = currentPage >= totalPages;
+}
+
+document.getElementById('pagePrev').addEventListener('click', () => {
+  if(currentPage > 1){ currentPage--; render(); }
+});
+document.getElementById('pageNext').addEventListener('click', () => {
+  currentPage++; render();
+});
+
+// Docks the floating pagination bar once its natural document position (the anchor, right
+// after the table) has scrolled into view or past — so it settles above the legend/footer
+// instead of floating over them for the rest of the page. rAF-throttled so fast/continuous
+// scrolling never runs this more than once per frame, and it's a single getBoundingClientRect
+// read plus a class toggle — nowhere near the cost of the render() work this page used to do
+// on scroll-adjacent events.
+const paginationEl = document.getElementById('pagination');
+const paginationAnchorEl = document.getElementById('paginationAnchor');
+let dockCheckQueued = false;
+function checkPaginationDock(){
+  dockCheckQueued = false;
+  const top = paginationAnchorEl.getBoundingClientRect().top;
+  paginationEl.classList.toggle('docked', top <= window.innerHeight);
+}
+function scheduleDockCheck(){
+  if(dockCheckQueued) return;
+  dockCheckQueued = true;
+  requestAnimationFrame(checkPaginationDock);
+}
+window.addEventListener('scroll', scheduleDockCheck, { passive: true });
+window.addEventListener('resize', scheduleDockCheck, { passive: true });
+checkPaginationDock();
+
+// The cookie banner and the floating pagination bar both anchor near the bottom of the
+// viewport; when the banner is showing, lift the pagination bar clear of it instead of
+// letting them overlap.
+function updatePaginationOffset(){
+  const banner = document.getElementById('cookieBanner');
+  paginationEl.style.bottom = banner.hidden ? '16px' : `${banner.getBoundingClientRect().height + 32}px`;
+}
+
+// A new sort order, search, or filter is a new result set — always worth landing back on page 1
+// rather than whatever page happened to be open before.
+function renderFromPage1(){
+  currentPage = 1;
+  render();
+}
+
 document.getElementById('tableHeadRow').addEventListener('click', (e) => {
   const th = e.target.closest('th');
   if(!th) return;
   const key = th.dataset.key;
   if(sortKey === key){ sortDir *= -1; } else { sortKey = key; sortDir = 1; }
-  render();
+  renderFromPage1();
 });
 
 let searchDebounceTimer = null;
 document.getElementById('search').addEventListener('input', () => {
   clearTimeout(searchDebounceTimer);
-  searchDebounceTimer = setTimeout(render, 250);
+  searchDebounceTimer = setTimeout(renderFromPage1, 250);
 });
-document.getElementById('bandFilter').addEventListener('change', render);
-document.getElementById('langFilter').addEventListener('change', render);
-document.getElementById('classFilter').addEventListener('change', render);
+document.getElementById('bandFilter').addEventListener('change', renderFromPage1);
+document.getElementById('langFilter').addEventListener('change', renderFromPage1);
+document.getElementById('classFilter').addEventListener('change', renderFromPage1);
 
 function updateClock(){
   const d = new Date();
@@ -950,7 +1337,9 @@ function setBand(id){
   document.getElementById('footerText').innerHTML = band.footerHtml;
   document.getElementById('legendExtra').innerHTML = band.classDefs ? renderClassDefs(band.classDefs) : '';
   document.title = `${band.label} Log: Active Frequencies`;
-  COLUMN_DEFS.freq.label = `Freq (${band.freqUnit || 'kHz'})`;
+  COLUMN_DEFS.freq.label = band.id === 'favorites' ? 'Freq' : `Freq (${band.freqUnit || 'kHz'})`;
+
+  if(band.id === 'favorites') rebuildFavoritesData();
 
   document.getElementById('countrySuffix').hidden = !(band.filters.country || band.filters.region);
   document.getElementById('countrySwitch').hidden = !band.filters.country;
@@ -962,6 +1351,7 @@ function setBand(id){
 
   document.getElementById('search').value = '';
   sortKey = 'freq'; sortDir = 1;
+  currentPage = 1;
 
   buildBandMenu();
   buildTableHead();
@@ -974,6 +1364,7 @@ function setBand(id){
     render();
   }
   closeMenu();
+  persistState();
 }
 
 // Bands with a `lazy: true` flag don't ship their data in the initial page load.
@@ -996,6 +1387,14 @@ function loadBandScript(band){
       buildRuler();
       populateFilters();
       render();
+      // A lazy band's real data (and, for Airband, its regions list) only exists from this point
+      // on, so a pending restore targeting a specific country/region has to wait until here.
+      if(pendingRestoreRegionId){
+        const id = pendingRestoreRegionId;
+        pendingRestoreRegionId = null;
+        const exists = currentCountry && currentCountry.regions && currentCountry.regions.some(r => r.id === id);
+        if(exists) setRegion(id);
+      }
     }
   };
   script.onerror = () => {
@@ -1050,14 +1449,71 @@ function matchesSelectedRegion(d, region){
 }
 
 let lastFocusedElement = null;
+let scheduleStatusInterval = null;
+
+// Builds the status block under the big frequency: a plain badge for always-on/no-fixed-schedule
+// rows, or, for rows with a real bounded clock schedule, a live "starts at / starts in" (off air)
+// or "on for / ends in" + seek bar (on air) pair. Regenerated wholesale on each refresh tick rather
+// than patched piecemeal, so an on-air row that flips to off air mid-view (or vice versa) swaps its
+// whole layout (the seek bar only exists in the "on" state) without any stale leftover markup.
+function buildScheduleStatusHtml(row){
+  const alwaysOn = isAlwaysOn(row);
+  if(alwaysOn) return `<div class="modal-status">ALWAYS ON AIR</div>`;
+  if(row.start === row.end){
+    return `<div class="modal-status">${isActiveNow(row) ? 'ON AIR NOW' : 'OFF AIR RIGHT NOW'}</div>`;
+  }
+  const status = computeScheduleStatus(nowUTCMinutes(), toMinutes(row.start), toMinutes(row.end));
+  if(status.state === 'on'){
+    const pct = (status.progress * 100).toFixed(2);
+    return `
+      <div class="modal-schedule-main modal-schedule-blue">On air, up ${formatDuration(status.minutesSinceStart)}</div>
+      <div class="modal-schedule-sub modal-schedule-yellow">Ends in ${formatDuration(status.minutesUntilEnd)}</div>
+      <div class="modal-seekbar">
+        <div class="modal-seekbar-fill" style="width:${pct}%"></div>
+        <div class="modal-seekbar-cursor" style="left:${pct}%"></div>
+      </div>`;
+  }
+  return `
+    <div class="modal-schedule-main modal-schedule-blue">Starts at ${formatTime(row.start)} UTC</div>
+    <div class="modal-schedule-sub modal-schedule-orange">Starts in ${formatDuration(status.minutesUntilStart)}</div>`;
+}
+
+let currentModalRow = null;
+let currentModalOriginBand = null;
+
+function updateModalStarButton(){
+  const btn = document.getElementById('modalStar');
+  if(!currentModalRow || !currentModalOriginBand){
+    btn.textContent = '☆';
+    btn.classList.remove('is-fav');
+    return;
+  }
+  const fav = isFavorited(currentModalOriginBand.id, currentModalRow.freq, currentModalRow.station);
+  btn.textContent = fav ? '★' : '☆';
+  btn.classList.toggle('is-fav', fav);
+}
+
+document.getElementById('modalStar').addEventListener('click', () => {
+  if(!currentModalRow || !currentModalOriginBand) return;
+  if(!cookiesAllowed()){ showCookieBanner(); return; }
+  toggleFavorite(currentModalOriginBand, currentModalRow);
+  updateModalStarButton();
+});
 
 function openDetailModal(row){
-  const band = currentBand;
+  // A row viewed from the Favorites list carries where it actually came from (_origBand); every
+  // other band's rows are just viewed from the band they belong to. Fields, the class lookup, and
+  // the description template must all use that ORIGIN band, not whichever band's table is on
+  // screen right now, so a favorited Airband row still renders as an Airband facility, not as a
+  // (nonsensical) Favorites-shaped one.
+  const band = row._origBand ? (BAND_REGISTRY.find(b => b.id === row._origBand) || currentBand) : currentBand;
   const alwaysOn = isAlwaysOn(row);
   const active = isActiveNow(row);
-  const status = alwaysOn ? 'Always on air' : (active ? 'On air now' : 'Off air right now');
-  const unit = band.freqUnit || band.rulerUnit || 'kHz';
+  const unit = row._freqUnit || band.freqUnit || band.rulerUnit || 'kHz';
   const desc = buildDescription(band.id, row, { classDefs: band.classDefs });
+
+  currentModalRow = row;
+  currentModalOriginBand = band;
 
   const fields = [];
   if(band.columns.includes('site')) fields.push(['Transmitter / Country', row.site]);
@@ -1074,7 +1530,7 @@ function openDetailModal(row){
 
   document.getElementById('modalContent').innerHTML = `
     <div class="modal-freq ${alwaysOn ? 'always-on' : (active ? 'active-now' : '')}">${row.freq.toFixed(row.freq % 1 ? 1 : 0)}<span class="modal-unit">${unit}</span></div>
-    <div class="modal-status">${status}</div>
+    <div class="modal-schedule-wrap" id="modalScheduleWrap">${buildScheduleStatusHtml(row)}</div>
     <h2 class="modal-title">${row.station}${row.name ? `<span class="modal-subtitle">${row.name}</span>` : ''}</h2>
     <p class="modal-desc">${desc}</p>
     <div class="modal-grid">
@@ -1082,20 +1538,34 @@ function openDetailModal(row){
     </div>
   `;
 
+  clearInterval(scheduleStatusInterval);
+  if(!alwaysOn && row.start !== row.end){
+    scheduleStatusInterval = setInterval(() => {
+      const wrap = document.getElementById('modalScheduleWrap');
+      if(!wrap){ clearInterval(scheduleStatusInterval); return; }
+      wrap.innerHTML = buildScheduleStatusHtml(row);
+    }, 1000);
+  }
+
+  updateModalStarButton();
+
   lastFocusedElement = document.activeElement;
   const modal = document.getElementById('detailModal');
   modal.hidden = false;
   document.getElementById('modalBackdrop').hidden = false;
   modal.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
   document.getElementById('modalClose').focus();
 }
 
 function closeDetailModal(){
   const modal = document.getElementById('detailModal');
   if(modal.hidden) return;
+  clearInterval(scheduleStatusInterval);
   modal.hidden = true;
   document.getElementById('modalBackdrop').hidden = true;
   modal.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
   if(lastFocusedElement) lastFocusedElement.focus();
 }
 
@@ -1159,12 +1629,14 @@ function setCountry(id){
   currentCountry = c;
   currentRegion = (c.regions && c.regions[0]) || null;
   countryLabel.textContent = c.label;
+  currentPage = 1;
   buildCountryMenu();
   updateRegionUI();
   updateSubText();
   buildRuler();
   render();
   closeCountryMenu();
+  persistState();
 }
 
 countryBtn.addEventListener('click', (e) => {
@@ -1207,6 +1679,18 @@ function buildRegionMenu(){
   let visible = regions;
   if(large){
     if(!q){
+      if(currentBand.id === 'airband'){
+        const recents = loadRecentAirports();
+        if(recents.length){
+          regionResults.innerHTML = `<div class="region-hint">Recent searches</div>` + recents.map(r => `
+            <div class="recent-item">
+              <button type="button" class="band-option recent-option" role="option" data-region="${r.id}">${r.label}</button>
+              <button type="button" class="recent-remove" data-remove="${r.id}" aria-label="Remove ${r.label} from recent searches">&times;</button>
+            </div>
+          `).join('');
+          return;
+        }
+      }
       regionResults.innerHTML = `<div class="region-hint">Type to search ${regions.length.toLocaleString()} airports by code, name, or city…</div>`;
       return;
     }
@@ -1224,6 +1708,7 @@ regionSearchInput.addEventListener('click', (e) => e.stopPropagation());
 function openRegionMenu(){
   closeMenu();
   closeCountryMenu();
+  buildRegionMenu();
   regionMenu.hidden = false;
   regionBtn.setAttribute('aria-expanded', 'true');
 }
@@ -1236,14 +1721,21 @@ function closeRegionMenu(){
 function setRegion(id){
   const regions = (currentCountry && currentCountry.regions) || [];
   const r = regions.find(x => x.id === id);
-  if(!r || r === currentRegion){ closeRegionMenu(); return; }
+  if(!r){ closeRegionMenu(); return; }
+  // Record every successful pick, even re-picking the currently active airport, so searching
+  // the same one again brings it back to the top of the recent list as requested.
+  if(currentBand.id === 'airband') recordRecentAirport(r);
+  if(r === currentRegion){ closeRegionMenu(); return; }
   currentRegion = r;
   regionLabel.textContent = r.label;
+  regionSearchInput.value = '';
+  currentPage = 1;
   buildRegionMenu();
   updateSubText();
   buildRuler();
   render();
   closeRegionMenu();
+  persistState();
 }
 
 regionBtn.addEventListener('click', (e) => {
@@ -1252,6 +1744,13 @@ regionBtn.addEventListener('click', (e) => {
 });
 
 regionMenu.addEventListener('click', (e) => {
+  const removeBtn = e.target.closest('.recent-remove');
+  if(removeBtn){
+    e.stopPropagation();
+    removeRecentAirport(removeBtn.dataset.remove);
+    buildRegionMenu();
+    return;
+  }
   const opt = e.target.closest('.band-option');
   if(opt) setRegion(opt.dataset.region);
 });
@@ -1273,7 +1772,34 @@ populateFilters();
 updateSubText();
 render();
 updateClock();
-setInterval(() => { updateClock(); render(); }, 30000);
+// Skip the periodic refresh entirely while the tab is backgrounded — nobody's watching the
+// on-air highlighting update, so there's no reason to spend CPU on it.
+setInterval(() => {
+  if(document.hidden) return;
+  updateClock();
+  render();
+}, 30000);
+
+document.getElementById('cookieAccept').addEventListener('click', () => {
+  setCookie('cookieConsent', 'accepted', 365);
+  document.getElementById('cookieBanner').hidden = true;
+  updatePaginationOffset();
+});
+
+document.getElementById('cookieDeny').addEventListener('click', () => {
+  setCookie('cookieConsent', 'denied', 365);
+  deleteCookie('favorites');
+  deleteCookie('recentAirports');
+  deleteCookie('siteState');
+  document.getElementById('cookieBanner').hidden = true;
+  updatePaginationOffset();
+  if(currentBand.id === 'favorites'){ rebuildFavoritesData(); render(); }
+});
+
+document.getElementById('cookiesReopenBtn').addEventListener('click', showCookieBanner);
+
+initCookieBanner();
+if(!restoreFromUrl()) restoreSiteState();
 </script>
 
 </body>
