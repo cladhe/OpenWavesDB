@@ -440,6 +440,50 @@ footer{
   line-height:1.7;
 }
 footer a{color:var(--signal);}
+.about-section{
+  max-width:1180px;
+  margin:0 auto;
+  padding:40px 24px;
+  border-top:1px solid var(--line);
+  text-align:center;
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.7;
+}
+.about-section img{display:block;margin:0 auto 14px;border-radius:14px;}
+.about-section h2{
+  font-size:20px;
+  font-weight:700;
+  color:var(--text);
+  margin-bottom:10px;
+}
+.about-section p{max-width:560px;margin:0 auto 14px;}
+.about-section a{color:var(--signal);}
+.about-section a img{display:inline-block;margin:0;border-radius:0;}
+.about-section .netlify-badge-link{display:block;margin-top:14px;}
+.report-section{
+  max-width:1180px;
+  margin:0 auto;
+  padding:0 24px 64px;
+}
+.report-box{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:20px 24px;
+  color:var(--muted);
+  font-size:12.5px;
+  line-height:1.7;
+}
+.report-box h2{
+  font-size:12.5px;
+  font-weight:600;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--text);
+  margin-bottom:6px;
+}
+.report-box a{color:var(--signal);}
 
 @media (max-width:640px){
   [data-mobile-hide]{display:none;}
