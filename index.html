@@ -144,7 +144,7 @@
   <h2>OpenWavesDB</h2>
   <p>A live and large, searchable database of radio frequencies worldwide, covering Shortwave,
     Longwave, Mediumwave (AM), FM, and Airband, with live on-air status.</p>
-  <a href="https://openwavesdb.netlify.app/" target="_blank" rel="noopener">OpenWavesDB Website</a>
+  <a href="https://github.com/cladhe/OpenWavesDB" target="_blank" rel="noopener">OpenWavesDB's Repo</a>
   <a href="https://app.netlify.com/projects/openwavesdb/deploys" target="_blank" rel="noopener" class="netlify-badge-link">
     <img src="https://api.netlify.com/api/v1/badges/bc2d6e91-0b6f-4427-a9dc-f8e64fd088d4/deploy-status" alt="Netlify Status">
   </a>
@@ -153,7 +153,12 @@
 <div class="report-section">
   <div class="report-box">
     <h2>Something wrong, missing, not active anymore?</h2>
-    <div>Open an issue at <a href="https://github.com/cladhe/OpenWavesDB" target="_blank" rel="noopener">github.com/cladhe/OpenWavesDB</a>.</div>
+    <div>Open an issue at <a href="https://github.com/cladhe/OpenWavesDB/issues" target="_blank" rel="noopener">github.com/cladhe/OpenWavesDB/issues</a>.</div>
+  </div>
+  <div class="report-box">
+    <h2>Want to help?</h2>
+    <div>Read the Code of Conduct and find out how to report issues, submit pull requests, and add or maintain frequency coverage.</div>
+    <a class="report-btn" href="community.html">Code of Conduct &amp; Contributing</a>
   </div>
 </div>
 
@@ -717,6 +722,7 @@ const BAND_REGISTRY = [
       band.data = DATA_AIRBAND;
       band.bands = BANDS_AIRBAND;
       band.countries[0].regions = buildAirportRegions(DATA_AIRBAND);
+      browseCountryStats = buildBrowseCountryStats();
     },
     columns: ["freq","station","site","class","start","end","info"],
     mobileColumns: ["freq","station","class"],
@@ -1088,8 +1094,113 @@ function populateFilters(){
   classSel.hidden = !currentBand.filters.class;
 }
 
+const COUNTRY_COLUMN_DEFS = [
+  { id: 'country', label: 'Country', sortKey: 'country' },
+  { id: 'airportCount', label: 'Airports', sortKey: 'airportCount' },
+  { id: 'freqCount', label: 'Frequencies', sortKey: 'freqCount' },
+];
+
+// A "go back" row built into the list itself (styled via .back-row in styles.css) rather than a
+// floating button outside the table, only shown on page 1 since it's a navigation affordance
+// for the whole list, not something that needs to repeat on every page of it. `country`, when
+// given, is stamped onto the row as data-country so the click handler knows which country's
+// airport list to return to without needing to remember how this page was originally reached.
+function backRowHtml(colspan, label, country){
+  const attr = country ? ` data-country="${country}"` : '';
+  return `<tr class="back-row" tabindex="0"${attr}><td colspan="${colspan}">← ${label}</td></tr>`;
+}
+
+function renderCountryTable(){
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  let countries = q ? browseCountryStats.filter(c => c.country.toLowerCase().includes(q)) : browseCountryStats;
+
+  countries = [...countries].sort((a,b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if(sortKey === 'country'){ av = av.toLowerCase(); bv = bv.toLowerCase(); }
+    if(av < bv) return -1 * sortDir;
+    if(av > bv) return 1 * sortDir;
+    return 0;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(countries.length / PAGE_SIZE));
+  if(currentPage > totalPages) currentPage = totalPages;
+  if(currentPage < 1) currentPage = 1;
+  const pageRows = countries.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = pageRows.map(c => `
+    <tr class="country-row" data-country="${c.country}" tabindex="0">
+      <td data-col="country">${c.country}</td>
+      <td data-col="airportCount">${c.airportCount.toLocaleString()}</td>
+      <td data-col="freqCount">${c.freqCount.toLocaleString()}</td>
+    </tr>`
+  ).join('');
+
+  document.getElementById('rowCount').textContent = pageRows.length;
+  document.getElementById('entriesAvailable').textContent = countries.length;
+  document.getElementById('noResults').style.display = countries.length ? 'none' : 'block';
+  document.getElementById('freqTable').style.display = countries.length ? 'table' : 'none';
+  updatePaginationControls(pageRows, countries.length, totalPages);
+  updateSortIndicators();
+}
+
+const BROWSE_COLUMN_DEFS = [
+  { id: 'type', label: 'Type', sortKey: 'type' },
+  { id: 'name', label: 'Name', sortKey: 'name' },
+  { id: 'city', label: 'City', sortKey: 'city' },
+  { id: 'code', label: 'Code', sortKey: 'code' },
+];
+
+function renderBrowseTable(){
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  let entities = buildAirbandEntities(browseCountryValue);
+  if(q){
+    entities = entities.filter(e =>
+      e.name.toLowerCase().includes(q) || e.city.toLowerCase().includes(q) ||
+      e.code.toLowerCase().includes(q) || e.type.toLowerCase().includes(q)
+    );
+  }
+  entities.sort((a,b) => {
+    const av = String(a[sortKey] ?? '').toLowerCase();
+    const bv = String(b[sortKey] ?? '').toLowerCase();
+    if(av < bv) return -1 * sortDir;
+    if(av > bv) return 1 * sortDir;
+    return 0;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(entities.length / PAGE_SIZE));
+  if(currentPage > totalPages) currentPage = totalPages;
+  if(currentPage < 1) currentPage = 1;
+  const pageRows = entities.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const tbody = document.getElementById('tbody');
+  const backRow = currentPage === 1 ? backRowHtml(BROWSE_COLUMN_DEFS.length, 'Back to countries') : '';
+  tbody.innerHTML = backRow + pageRows.map(e => `
+    <tr class="browse-row" data-region="${e.region}" tabindex="0">
+      <td data-col="type">${e.type}</td>
+      <td data-col="name">${e.name}</td>
+      <td data-col="city">${e.city || '—'}</td>
+      <td data-col="code">${e.code}</td>
+    </tr>`
+  ).join('');
+
+  document.getElementById('rowCount').textContent = pageRows.length;
+  document.getElementById('entriesAvailable').textContent = entities.length;
+  document.getElementById('noResults').style.display = entities.length ? 'none' : 'block';
+  document.getElementById('freqTable').style.display = entities.length ? 'table' : 'none';
+  updatePaginationControls(pageRows, entities.length, totalPages);
+  updateSortIndicators();
+}
+
 function buildTableHead(){
   const tr = document.getElementById('tableHeadRow');
+  if(currentBand.id === 'airband' && browseStage){
+    const defs = browseStage === 'countries' ? COUNTRY_COLUMN_DEFS : BROWSE_COLUMN_DEFS;
+    tr.innerHTML = defs.map(c =>
+      `<th data-key="${c.sortKey}" data-col="${c.id}">${c.label}</th>`
+    ).join('');
+    return;
+  }
   const hidden = new Set(computeMobileHiddenColumns(currentBand.columns, currentBand.mobileColumns));
   tr.innerHTML = currentBand.columns.map(c =>
     `<th data-key="${COLUMN_DEFS[c].sortKey}" data-col="${c}"${hidden.has(c) ? ' data-mobile-hide' : ''}>${COLUMN_DEFS[c].label}</th>`
@@ -1100,6 +1211,48 @@ let sortKey = 'freq', sortDir = 1;
 let lastRenderedRows = [];
 const PAGE_SIZE = 100;
 let currentPage = 1;
+
+// ---------- airband country browse (separate from the shared country/region pickers used by
+// MW/FM: those filter the frequency table in place; this swaps the table to a different kind of
+// row entirely, so it gets its own state and its own render path) ----------
+let browseStage = null;         // null (normal) | 'countries' | 'entities': which table #tbody shows
+let browseCountryValue = null;  // the `country` string currently browsed, e.g. "France" (stage 'entities')
+let browseCountryStats = [];    // one row per country, populated once Airband's data loads (see BAND_REGISTRY)
+
+// One row per country: how many distinct entities (airports/heliports/en-route stations) and how
+// many total frequency rows it has: the top level of the country-browse table.
+function buildBrowseCountryStats(){
+  const stats = new Map();
+  DATA_AIRBAND.forEach(d => {
+    if(!stats.has(d.country)) stats.set(d.country, { country: d.country, regions: new Set(), freqCount: 0 });
+    const s = stats.get(d.country);
+    s.regions.add(d.region);
+    s.freqCount++;
+  });
+  return [...stats.values()]
+    .map(s => ({ country: s.country, airportCount: s.regions.size, freqCount: s.freqCount }))
+    .sort((a,b) => a.country.localeCompare(b.country));
+}
+
+// One row per distinct entity (airport/heliport/en-route station/etc.) in a given country: the
+// same grouping key (region code) buildAirportRegions() already uses, but scoped to one country
+// at a time, which sidesteps that function's cross-country id-disambiguation logic entirely
+// (within a single country, a region/airport code is always unique).
+function buildAirbandEntities(countryValue){
+  const byRegion = new Map();
+  DATA_AIRBAND.forEach(d => {
+    if(d.country !== countryValue) return;
+    if(byRegion.has(d.region)) return;
+    byRegion.set(d.region, {
+      region: d.region,
+      type: d.type || 'airport',
+      name: d.aptName || d.region,
+      city: d.city || '',
+      code: d.altCode ? `${d.altCode} / ${d.region}` : d.region,
+    });
+  });
+  return [...byRegion.values()];
+}
 
 function renderCell(colId, d, extra){
   const hideAttr = extra.hiddenCols.has(colId) ? ' data-mobile-hide' : '';
@@ -1120,6 +1273,8 @@ function renderCell(colId, d, extra){
 }
 
 function render(){
+  if(currentBand.id === 'airband' && browseStage === 'countries'){ renderCountryTable(); return; }
+  if(currentBand.id === 'airband' && browseStage === 'entities'){ renderBrowseTable(); return; }
   const q = document.getElementById('search').value.trim().toLowerCase();
   const bandF = document.getElementById('bandFilter').value;
   const langF = document.getElementById('langFilter').value;
@@ -1133,7 +1288,7 @@ function render(){
 
   const noSelectionYet = currentBand.requireRegion && !currentRegion;
 
-  // The haystack string is only built when there's actually a query to match against — for
+  // The haystack string is only built when there's actually a query to match against: for
   // large bands (Mediumwave, Airband) building and lowercasing it for every row on every render,
   // even with an empty search box, was pure wasted work. `!q ||` short-circuits past it entirely
   // when there's nothing to search for.
@@ -1162,7 +1317,7 @@ function render(){
   });
 
   // Only ever build DOM for one page's worth of rows. Some bands run to tens of thousands of
-  // matches (Airband, Mediumwave) — inserting all of them at once is what was blowing up paint
+  // matches (Airband, Mediumwave): inserting all of them at once is what was blowing up paint
   // and interaction timing; a fixed-size slice keeps every render() cheap regardless of band size.
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   if(currentPage > totalPages) currentPage = totalPages;
@@ -1172,7 +1327,15 @@ function render(){
   lastRenderedRows = pageRows;
 
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = pageRows.map((d, i) => {
+  // Shown for every airband entity page regardless of how it was reached (browsing, the search
+  // dropdown, a shared link, a restored session): derived from the entity's own country, not
+  // from browsing history, so it works the same way no matter the entry point.
+  let backRow = '';
+  if(currentBand.id === 'airband' && regionObj && currentPage === 1){
+    const regionCountry = currentBand.data.find(d => matchesSelectedRegion(d, regionObj));
+    if(regionCountry) backRow = backRowHtml(currentBand.columns.length, `Back to ${regionCountry.country} airports`, regionCountry.country);
+  }
+  tbody.innerHTML = backRow + pageRows.map((d, i) => {
     const alwaysOn = isAlwaysOn(d);
     const active = isActiveNow(d);
     const extra = {
@@ -1195,7 +1358,10 @@ function render(){
   document.getElementById('noResults').style.display = (rows.length || noSelectionYet) ? 'none' : 'block';
   document.getElementById('freqTable').style.display = rows.length ? 'table' : 'none';
   updatePaginationControls(pageRows, rows.length, totalPages);
+  updateSortIndicators();
+}
 
+function updateSortIndicators(){
   document.querySelectorAll('#tableHeadRow th').forEach(th => {
     th.classList.toggle('sorted', th.dataset.key === sortKey);
     const base = th.textContent.replace(' ▲','').replace(' ▼','');
@@ -1220,6 +1386,13 @@ const SORT_RANGE_LABELS = {
   end:             { label: 'end times', format: d => formatTime(d.end) },
   info:            { label: 'info', format: d => d.info },
   _origBandLabel:  { label: 'bands', format: d => d._origBandLabel },
+  type:            { label: 'types', format: e => e.type },
+  name:            { label: 'names', format: e => e.name },
+  city:            { label: 'cities', format: e => e.city || '—' },
+  code:            { label: 'codes', format: e => e.code },
+  country:         { label: 'countries', format: c => c.country },
+  airportCount:    { label: 'airport counts', format: c => c.airportCount },
+  freqCount:       { label: 'frequency counts', format: c => c.freqCount },
 };
 
 function buildPageRangeLabel(pageRows){
@@ -1255,10 +1428,10 @@ document.getElementById('pageNext').addEventListener('click', () => {
 });
 
 // Docks the floating pagination bar once its natural document position (the anchor, right
-// after the table) has scrolled into view or past — so it settles above the legend/footer
+// after the table) has scrolled into view or past, so it settles above the legend/footer
 // instead of floating over them for the rest of the page. rAF-throttled so fast/continuous
 // scrolling never runs this more than once per frame, and it's a single getBoundingClientRect
-// read plus a class toggle — nowhere near the cost of the render() work this page used to do
+// read plus a class toggle: nowhere near the cost of the render() work this page used to do
 // on scroll-adjacent events.
 const paginationEl = document.getElementById('pagination');
 const paginationAnchorEl = document.getElementById('paginationAnchor');
@@ -1291,7 +1464,7 @@ function updatePaginationOffset(){
   paginationEl.style.bottom = banner.hidden ? '16px' : `${banner.getBoundingClientRect().height + 32}px`;
 }
 
-// A new sort order, search, or filter is a new result set — always worth landing back on page 1
+// A new sort order, search, or filter is a new result set: always worth landing back on page 1
 // rather than whatever page happened to be open before.
 function renderFromPage1(){
   currentPage = 1;
@@ -1377,6 +1550,7 @@ function setBand(id){
   document.getElementById('search').value = '';
   sortKey = 'freq'; sortDir = 1;
   currentPage = 1;
+  browseStage = null; browseCountryValue = null;
 
   buildBandMenu();
   buildTableHead();
@@ -1386,7 +1560,14 @@ function setBand(id){
   } else {
     buildRuler();
     populateFilters();
-    render();
+    // Airband has no default region (see noDefaultRegion above), so with nothing selected the
+    // main page for this band defaults to the country browse table instead of an empty
+    // "search an airport" placeholder.
+    if(band.id === 'airband' && !currentRegion){
+      enterCountryBrowse();
+    } else {
+      render();
+    }
   }
   closeMenu();
   persistState();
@@ -1411,9 +1592,16 @@ function loadBandScript(band){
       updateSubText();
       buildRuler();
       populateFilters();
-      render();
+      // Same country-browse default as setBand(): this is the first-ever load of a lazy band,
+      // so browseCountryStats only exists from this point on (built inside band.onReady above).
+      if(band.id === 'airband' && !currentRegion){
+        enterCountryBrowse();
+      } else {
+        render();
+      }
       // A lazy band's real data (and, for Airband, its regions list) only exists from this point
       // on, so a pending restore targeting a specific country/region has to wait until here.
+      // setRegion() below clears the country-browse default above if a saved pick resolves.
       if(pendingRestoreRegionId){
         const id = pendingRestoreRegionId;
         pendingRestoreRegionId = null;
@@ -1600,13 +1788,33 @@ function rowFromEvent(e){
   return lastRenderedRows[Number(tr.dataset.idx)] || null;
 }
 
+// The back row's destination depends on which table it's in: from the entity list it returns to
+// the country list; from a frequency view it returns to whichever country the row itself is
+// stamped with (see backRowHtml), independent of how that page was originally reached.
+function handleBackRowClick(row){
+  if(browseStage === 'entities') enterCountryBrowse();
+  else if(row.dataset.country) enterEntityBrowse(row.dataset.country);
+}
+
 document.getElementById('tbody').addEventListener('click', (e) => {
+  const backRow = e.target.closest('tr.back-row');
+  if(backRow){ handleBackRowClick(backRow); return; }
+  const countryRow = e.target.closest('tr.country-row');
+  if(countryRow){ enterEntityBrowse(countryRow.dataset.country); return; }
+  const browseRow = e.target.closest('tr.browse-row');
+  if(browseRow){ selectBrowseEntity(browseRow.dataset.region); return; }
   const row = rowFromEvent(e);
   if(row) openDetailModal(row);
 });
 
 document.getElementById('tbody').addEventListener('keydown', (e) => {
   if(e.key !== 'Enter' && e.key !== ' ') return;
+  const backRow = e.target.closest('tr.back-row');
+  if(backRow){ e.preventDefault(); handleBackRowClick(backRow); return; }
+  const countryRow = e.target.closest('tr.country-row');
+  if(countryRow){ e.preventDefault(); enterEntityBrowse(countryRow.dataset.country); return; }
+  const browseRow = e.target.closest('tr.browse-row');
+  if(browseRow){ e.preventDefault(); selectBrowseEntity(browseRow.dataset.region); return; }
   const row = rowFromEvent(e);
   if(row){ e.preventDefault(); openDetailModal(row); }
 });
@@ -1747,10 +1955,17 @@ function setRegion(id){
   const regions = (currentCountry && currentCountry.regions) || [];
   const r = regions.find(x => x.id === id);
   if(!r){ closeRegionMenu(); return; }
+  const wasBrowsing = !!browseStage;
+  browseStage = null;
+  if(wasBrowsing) buildTableHead();
   // Record every successful pick, even re-picking the currently active airport, so searching
   // the same one again brings it back to the top of the recent list as requested.
   if(currentBand.id === 'airband') recordRecentAirport(r);
-  if(r === currentRegion){ closeRegionMenu(); return; }
+  if(r === currentRegion){
+    if(wasBrowsing) render();
+    closeRegionMenu();
+    return;
+  }
   currentRegion = r;
   regionLabel.textContent = r.label;
   regionSearchInput.value = '';
@@ -1786,6 +2001,47 @@ document.addEventListener('click', (e) => {
   if(!regionMenu.hidden && !e.target.closest('#regionBtn') && !e.target.closest('#regionMenu')) closeRegionMenu();
 });
 
+// ---------- airband country browse (no popup, no floating buttons: the main table itself
+// becomes a country list, then an entity list, then the normal per-entity frequency view; moving
+// up a level is a "back" row built into the list itself, styled via .back-row in styles.css) ----------
+function enterCountryBrowse(){
+  browseStage = 'countries';
+  browseCountryValue = null;
+  sortKey = 'country'; sortDir = 1;
+  currentPage = 1;
+  document.getElementById('search').value = '';
+  buildTableHead();
+  document.getElementById('subText').textContent =
+    `Browsing every country with Airband data. Click a row to see its airports and en-route stations.`;
+  render();
+  persistState();
+}
+
+function enterEntityBrowse(country){
+  browseStage = 'entities';
+  browseCountryValue = country;
+  sortKey = 'name'; sortDir = 1;
+  currentPage = 1;
+  document.getElementById('search').value = '';
+  buildTableHead();
+  document.getElementById('subText').textContent =
+    `Browsing every airport, heliport, and en-route station recorded for ${country}. Click a row to see its frequencies.`;
+  render();
+  persistState();
+}
+
+// Reuses the existing setRegion() (the same function the search-an-airport dropdown calls) so
+// picking an entity from the browse table behaves identically to picking it by search: same
+// recent-searches recording, same region label, same ruler zoom, same persisted state, same
+// frequency-view back row (render() derives that row from the entity's own data, not from how
+// this page was reached; see the backRow logic in render()).
+function selectBrowseEntity(regionCode){
+  const regions = (currentBand.countries[0] && currentBand.countries[0].regions) || [];
+  const r = regions.find(x => x.region === regionCode && (!x.country || x.country === browseCountryValue));
+  if(!r) return;
+  setRegion(r.id); // clears browseStage/rebuilds the table head itself (see setRegion's wasBrowsing check)
+}
+
 document.addEventListener('keydown', (e) => {
   if(e.key === 'Escape'){ closeMenu(); closeCountryMenu(); closeRegionMenu(); closeDetailModal(); }
 });
@@ -1797,7 +2053,7 @@ populateFilters();
 updateSubText();
 render();
 updateClock();
-// Skip the periodic refresh entirely while the tab is backgrounded — nobody's watching the
+// Skip the periodic refresh entirely while the tab is backgrounded: nobody's watching the
 // on-air highlighting update, so there's no reason to spend CPU on it.
 setInterval(() => {
   if(document.hidden) return;

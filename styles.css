@@ -465,8 +465,12 @@ footer a{color:var(--signal);}
   max-width:1180px;
   margin:0 auto;
   padding:0 24px 64px;
+  display:flex;
+  gap:16px;
+  flex-wrap:wrap;
 }
 .report-box{
+  flex:1 1 280px;
   background:var(--panel);
   border:1px solid var(--line);
   border-radius:14px;
@@ -639,6 +643,16 @@ footer a{color:var(--signal);}
 }
 tbody tr{cursor:pointer;}
 
+/* A "go back" row inside the Airband country/entity browse tables, styled as a distinct list
+   item rather than a floating button outside the table, so navigating up a level is just another
+   row in the same list. */
+tr.back-row td{
+  background:var(--panel-2);
+  color:var(--amber);
+  font-weight:600;
+}
+tr.back-row:hover td{background:rgba(240,196,138,0.14);}
+
 /* ---------- COOKIE BANNER ---------- */
 .cookie-banner{
   position:fixed;
@@ -707,3 +721,114 @@ tbody tr{cursor:pointer;}
   z-index:150;
 }
 .cookies-reopen-btn:hover{color:var(--signal);border-color:var(--signal);}
+
+/* ---------- REPORT-SECTION CTA BUTTON (links out to community.html) ---------- */
+.report-box a.report-btn{
+  display:inline-block;
+  margin-top:10px;
+  background:rgba(167,205,242,0.10);
+  border:1px solid rgba(167,205,242,0.35);
+  color:var(--active-blue);
+  font-family:inherit;
+  font-size:12.5px;
+  font-weight:700;
+  padding:9px 18px;
+  border-radius:999px;
+  text-decoration:none;
+  cursor:pointer;
+}
+.report-box a.report-btn:hover{background:rgba(167,205,242,0.18);border-color:var(--active-blue);}
+
+/* ---------- COMMUNITY / DOC PAGE (community.html) ---------- */
+.doc-header{
+  max-width:760px;
+  margin:0 auto;
+  padding:40px 24px 0;
+}
+.doc-back{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:var(--muted);
+  text-decoration:none;
+  font-size:13px;
+  font-weight:600;
+}
+.doc-back:hover{color:var(--signal);}
+.doc-header h1{
+  font-weight:800;
+  font-size:clamp(28px, 4.5vw, 40px);
+  line-height:1.1;
+  margin:20px 0 10px;
+  letter-spacing:-0.01em;
+}
+.doc-header .sub{margin-bottom:24px;}
+.doc-nav{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:8px;
+}
+.doc-nav a{
+  background:var(--panel);
+  border:1px solid var(--line);
+  color:var(--text);
+  text-decoration:none;
+  font-size:12.5px;
+  font-weight:600;
+  padding:8px 14px;
+  border-radius:999px;
+}
+.doc-nav a:hover{border-color:var(--signal);color:var(--signal);}
+
+.doc-content{
+  max-width:760px;
+  margin:0 auto;
+  padding:16px 24px 80px;
+  color:var(--text);
+  font-size:14.5px;
+  line-height:1.7;
+}
+.doc-content section{
+  padding-top:36px;
+  margin-top:36px;
+  border-top:1px solid var(--line);
+}
+.doc-content section:first-child{padding-top:0;margin-top:0;border-top:none;}
+.doc-content h2{
+  font-size:24px;
+  font-weight:800;
+  color:var(--amber);
+  margin:0 0 16px;
+  letter-spacing:-0.01em;
+}
+.doc-content h3{
+  font-size:16px;
+  font-weight:700;
+  color:var(--signal);
+  margin:28px 0 10px;
+}
+.doc-content h3:first-of-type{margin-top:8px;}
+.doc-content h4{
+  font-size:14px;
+  font-weight:700;
+  color:var(--text);
+  margin:20px 0 8px;
+}
+.doc-content p{margin:0 0 14px;}
+.doc-content ul, .doc-content ol{margin:0 0 14px;padding-left:22px;}
+.doc-content li{margin-bottom:8px;}
+.doc-content a{color:var(--signal);text-decoration:none;border-bottom:1px dotted var(--signal);}
+.doc-content a:hover{color:var(--amber);border-color:var(--amber);}
+.doc-content strong{color:var(--text);font-weight:700;}
+.doc-content .doc-lede{color:var(--muted);font-size:15px;margin-bottom:24px;}
+.doc-content .doc-callout{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:16px 20px;
+  color:var(--muted);
+  font-size:13.5px;
+  margin:0 0 18px;
+}
+.doc-content .doc-callout strong{color:var(--text);}
