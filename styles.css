@@ -440,6 +440,13 @@ footer{
   line-height:1.7;
 }
 footer a{color:var(--signal);}
+.site-footer-links{
+  max-width:1180px;
+  margin:-40px auto 24px;
+  padding:0 24px;
+  font-size:12.5px;
+}
+.site-footer-links a{color:var(--signal);}
 .about-section{
   max-width:1180px;
   margin:0 auto;
@@ -646,12 +653,12 @@ tbody tr{cursor:pointer;}
 /* A "go back" row inside the Airband country/entity browse tables, styled as a distinct list
    item rather than a floating button outside the table, so navigating up a level is just another
    row in the same list. */
-tr.back-row td{
+tr.back-row td, tr.identify-back-row td{
   background:var(--panel-2);
   color:var(--amber);
   font-weight:600;
 }
-tr.back-row:hover td{background:rgba(240,196,138,0.14);}
+tr.back-row:hover td, tr.identify-back-row:hover td{background:rgba(240,196,138,0.14);}
 
 /* ---------- COOKIE BANNER ---------- */
 .cookie-banner{
@@ -845,3 +852,26 @@ tr.back-row:hover td{background:rgba(240,196,138,0.14);}
   margin:0 0 18px;
 }
 .doc-content .doc-callout strong{color:var(--text);}
+
+/* ---------- IDENTIFY A FREQUENCY ---------- */
+.identify-search-wrap{
+  max-width:640px;
+  margin:0 auto 32px;
+  padding:0 24px;
+  justify-content:center;
+}
+.identify-search-wrap:not([hidden]){display:flex;}
+#identifySearchInput{
+  width:100%;
+  max-width:420px;
+  background:var(--panel);
+  border:1px solid var(--line);
+  color:var(--text);
+  font-family:inherit;
+  font-size:16px;
+  padding:16px 22px;
+  border-radius:999px;
+  outline:none;
+  text-align:center;
+}
+#identifySearchInput:focus{border-color:var(--signal);box-shadow:0 0 0 3px rgba(159,216,201,0.15);}

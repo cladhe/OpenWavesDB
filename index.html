@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Radio Frequency Database: Shortwave, AM, FM & Airband</title>
 <meta name="description" content="A live, searchable database of radio frequencies worldwide, covering shortwave, AM, FM, and airband. Sortable by station, schedule, and more.">
+<link rel="canonical" href="https://openwavesdb.netlify.app/">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="preload" href="Manrope/Manrope-VariableFont_wght.ttf" as="font" type="font/ttf" crossorigin>
 <link rel="preload" href="database-shortwave.js" as="script">
@@ -75,6 +76,10 @@
   </div>
 </section>
 
+<div class="identify-search-wrap" id="identifySearchWrap" hidden>
+  <input type="text" id="identifySearchInput" placeholder="Type at least 3 digits, e.g. 125">
+</div>
+
 <div class="controls">
   <input type="text" id="search" placeholder="Search station, language, target, site…">
   <select id="bandFilter">
@@ -138,6 +143,7 @@
   that (a few are logged with a decimal, like 7280.1 kHz), so treat these as a starting point and
   expect to fine-tune once you're actually listening.
 </footer>
+<div class="site-footer-links"><a href="/frequency/">Browse all frequencies</a></div>
 
 <div class="about-section">
   <img src="favicon.svg" width="64" height="64" alt="OpenWavesDB logo">
@@ -191,6 +197,10 @@
 <script src="database-shortwave.js"></script>
 <script src="database-longwave.js"></script>
 <script src="radio-detail.js"></script>
+<script src="radio-table.js"></script>
+<script src="freq-slug.js"></script>
+<script src="band-meta.js"></script>
+<script src="frequency-search.js"></script>
 <script>
 // ---------- cookies ----------
 // Plain first-party cookies, used only to remember this browser's own preferences
@@ -347,6 +357,32 @@ function restoreFromUrl(){
     applyRestoredState('airband', '', airport);
     return true;
   }
+  // A generated frequency page (scripts/build-frequency-pages.js) is served at
+  // /frequency/<slug>/ — recognize it and narrow to that exact frequency. setBand() (called
+  // inside applyRestoredState) unconditionally resets document.title, so the page's own
+  // frequency-specific title (baked in by the generator) is captured before that call and
+  // restored after.
+  const freqSlugMatch = location.pathname.match(/^\/frequency\/([^/]+)\/?$/);
+  if(freqSlugMatch){
+    // freqToSlug/slugToFreqBand (freq-slug.js) deal only in whatever id string they're given —
+    // the URL uses BAND_META's human-readable slugId (e.g. "shortwave"), not BAND_REGISTRY's
+    // short id (e.g. "sw"), so it has to be translated back before touching currentBand/setBand.
+    const slugIdToBandId = Object.fromEntries(BAND_META.map(m => [m.slugId, m.id]));
+    const parsed = slugToFreqBand(freqSlugMatch[1], Object.keys(slugIdToBandId));
+    if(parsed){
+      const realBandId = slugIdToBandId[parsed.bandId];
+      const originalTitle = document.title;
+      if(realBandId === currentBand.id){
+        exactFreqFilter = parsed.freq;
+      } else {
+        applyRestoredState(realBandId, '', '');
+        exactFreqFilter = parsed.freq;
+      }
+      document.title = originalTitle;
+      render();
+      return true;
+    }
+  }
   const bandId = params.get('band');
   if(!bandId || !BAND_REGISTRY.some(b => b.id === bandId)) return false;
   applyRestoredState(bandId, params.get('country') || '', params.get('region') || '');
@@ -365,7 +401,12 @@ function updateUrlParams(){
     if(currentCountry && currentCountry.id) params.set('country', currentCountry.id);
     if(currentRegion && currentRegion.id) params.set('region', currentRegion.id);
   }
-  history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
+  // Always rewrites to the root path. A generated frequency page's pretty /frequency/<slug>/ URL
+  // is what Google indexes (that part never changes); once the live app's own state-sync runs
+  // (e.g. any setBand() call, including the one restoreFromUrl triggers on load), the address bar
+  // normalizes to the standard query-string form, same as every other deep link already does —
+  // accepted tradeoff, not a regression, since nothing here affects the indexed static file itself.
+  history.replaceState(null, '', `/?${params.toString()}`);
 }
 
 function persistState(){
@@ -877,6 +918,30 @@ const BAND_REGISTRY = [
       each is listed as its own entry with its country shown in the label so they can be told apart.`
   },
   {
+    id: "identify",
+    label: "Identify a Frequency",
+    lazy: true,
+    scriptSrc: "frequency-index.js",
+    loaded: false,
+    data: [],
+    bands: [],
+    onReady: (band) => { band.data = FREQUENCY_INDEX; },
+    columns: [],
+    mobileColumns: [],
+    filters: { band: false, lang: false, class: false, country: false },
+    rulerMin: 0,
+    rulerMax: 1,
+    rulerScale: "linear",
+    dialLabel: "Search for any known frequency",
+    subHtml: () => {
+      const band = BAND_REGISTRY.find(b => b.id === "identify");
+      if(!band.data.length) return "Loading frequency index…";
+      return `Type at least 3 digits to search across ${band.data.length.toLocaleString()} known frequencies.`;
+    },
+    footerHtml: `Every result links to that frequency's own page, pulled from the same live database as
+      every other tab here.`
+  },
+  {
     id: "favorites",
     label: "Favorites",
     data: [],
@@ -928,55 +993,6 @@ const REGION_NAMES = {
 function expandSiteForSearch(site){
   const m = site.match(/,\s*([A-Z]{2})$/);
   return m && REGION_NAMES[m[1]] ? REGION_NAMES[m[1]] : '';
-}
-
-const COLUMN_DEFS = {
-  freq:    { label: "Freq (kHz)", sortKey: "freq" },
-  station: { label: "Station", sortKey: "station" },
-  site:    { label: "Transmitter / Country", sortKey: "site" },
-  lang:    { label: "Language", sortKey: "lang" },
-  target:  { label: "Target", sortKey: "target" },
-  class:   { label: "Class", sortKey: "cls" },
-  start:   { label: "Start", sortKey: "start" },
-  end:     { label: "End", sortKey: "end" },
-  info:    { label: "Days / Info", sortKey: "info" },
-  band:    { label: "Band", sortKey: "_origBandLabel" },
-};
-
-function bandFor(freq){
-  return currentBand.bands.find(b => freq >= b.lo && freq <= b.hi);
-}
-
-function nowUTCMinutes(){
-  const d = new Date();
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
-}
-
-function toMinutes(hhmm){
-  const h = parseInt(hhmm.slice(0,2), 10);
-  const m = parseInt(hhmm.slice(2,4), 10);
-  return h * 60 + m;
-}
-
-function isActiveNow(d){
-  if(d.start === d.end) return false; // no fixed clock schedule (e.g. real switch time is local sunrise/sunset)
-  const nowM = nowUTCMinutes();
-  let start = toMinutes(d.start);
-  let end = toMinutes(d.end === "2400" ? "2400" : d.end);
-  if(d.start === "0000" && d.end === "2400") return true; // 24h broadcast
-  if(end <= start){
-    // wraps past midnight (e.g. 1950-1800, 2130-0700)
-    return nowM >= start || nowM < end;
-  }
-  return nowM >= start && nowM < end;
-}
-
-function isAlwaysOn(d){
-  return d.start === "0000" && d.end === "2400";
-}
-
-function formatTime(hhmm){
-  return hhmm.slice(0,2) + ":" + hhmm.slice(2,4);
 }
 
 function buildRuler(){
@@ -1083,7 +1099,7 @@ function populateFilters(){
       bandSel.appendChild(opt);
     }
   });
-  const langs = [...new Set(currentBand.data.flatMap(d => d.lang.split(/,\s*/)))].filter(Boolean).sort();
+  const langs = [...new Set(currentBand.data.flatMap(d => (d.lang || '').split(/,\s*/)))].filter(Boolean).sort();
   langs.forEach(l => {
     const opt = document.createElement('option');
     opt.value = l; opt.textContent = l;
@@ -1199,6 +1215,119 @@ function renderBrowseTable(){
   updateSortIndicators();
 }
 
+function renderIdentifyTable(){
+  // Reset explicitly rather than relying on the one-time updateSubText() call from setBand()/
+  // loadBandScript() — returning here from renderIdentifySubTable() (which overwrites subText
+  // with its own "N stations on..." message) goes through render(), not setBand(), so without
+  // this the drill-down's message would stay stuck on screen after going back.
+  document.getElementById('subText').textContent =
+    `Type at least 3 digits to search across ${currentBand.data.length.toLocaleString()} known frequencies.`;
+  const query = document.getElementById('identifySearchInput').value;
+  const matches = filterFrequencyIndex(currentBand.data, query, 3);
+
+  const totalPages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE));
+  if(currentPage > totalPages) currentPage = totalPages;
+  if(currentPage < 1) currentPage = 1;
+  const pageRows = matches.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  lastRenderedRows = pageRows;
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = pageRows.map((m, i) => {
+    // Single-match rows carry a real row (see scripts/build-frequency-pages.js), so their actual
+    // on-air status is known and shown the same amber/blue/green way every other table does.
+    // Multi-match rows have no one schedule to reflect — plain amber, no dot — and show a station
+    // count instead of a name, matching the shared td.freq styling used everywhere else either way.
+    const alwaysOn = m.row ? isAlwaysOn(m.row) : false;
+    const active = m.row ? isActiveNow(m.row) : false;
+    const freqClass = alwaysOn ? 'always-on' : (active ? 'active-now' : '');
+    const dot = active ? `<span class="live-dot${alwaysOn ? ' always' : ''}" title="${alwaysOn ? 'Always on air (24h daily)' : 'On air now'}"></span>` : '';
+    const info = m.row ? m.row.station : `${m.count.toLocaleString()} stations`;
+    return `
+    <tr class="identify-row" data-idx="${i}" data-slug="${m.slug}" tabindex="0">
+      <td class="freq ${freqClass}" data-col="freq">${String(m.freq)} ${m.freqUnit}${dot}</td>
+      <td data-col="band">${escapeHtml(m.bandLabel)}</td>
+      <td data-col="info">${escapeHtml(info)}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('rowCount').textContent = pageRows.length;
+  document.getElementById('entriesAvailable').textContent = matches.length;
+  const q = document.getElementById('identifySearchInput').value.trim();
+  document.getElementById('noResults').textContent = q.length < 3
+    ? 'Type at least 3 digits to search.'
+    : 'No frequencies match that search.';
+  document.getElementById('noResults').style.display = matches.length ? 'none' : 'block';
+  document.getElementById('freqTable').style.display = matches.length ? 'table' : 'none';
+  updatePaginationControls(pageRows, matches.length, totalPages);
+}
+
+// Drill-down shown when identifyDrillFreq is set (a multi-entry FREQUENCY_INDEX match): every
+// real station at that exact frequency, one row per station, Freq/Band/Info columns. Needs that
+// band's full data — lazy-loads it in the background via loadBandScript()'s onLoaded callback if
+// it isn't already loaded from an earlier visit to that band's own tab this session.
+function renderIdentifySubTable(){
+  const target = identifyDrillFreq;
+  const band = BAND_REGISTRY.find(b => b.id === target.bandId);
+  const tbody = document.getElementById('tbody');
+  // Not .back-row: that class is checked first in the click/keydown delegation below and routed
+  // to handleBackRowClick(), which is Airband-country-browse-specific — combining the two classes
+  // on one row would make this one silently do nothing. Same visual treatment, separate CSS rule
+  // (styles.css) instead, matching the .back-row colors exactly.
+  const backRow = `<tr class="identify-back-row" tabindex="0"><td colspan="4">← Back to search results</td></tr>`;
+
+  if(band.lazy && !band.loaded){
+    tbody.innerHTML = backRow;
+    document.getElementById('rowCount').textContent = '0';
+    document.getElementById('entriesAvailable').textContent = '0';
+    document.getElementById('noResults').style.display = 'none';
+    document.getElementById('freqTable').style.display = 'table';
+    document.getElementById('subText').textContent = `Loading ${band.label} data…`;
+    updatePaginationControls([], 0, 1);
+    loadBandScript(band, () => {
+      // Guards against a stale callback firing after the user has since gone back or drilled
+      // into a different frequency (by reference — a fresh search always creates a new match
+      // object, so this is never accidentally true for an unrelated drill-down).
+      if(currentBand.id === 'identify' && identifyDrillFreq === target) render();
+    });
+    return;
+  }
+
+  const allSubRows = band.data.filter(d => d.freq === target.freq);
+  const totalPages = Math.max(1, Math.ceil(allSubRows.length / PAGE_SIZE));
+  if(currentPage > totalPages) currentPage = totalPages;
+  if(currentPage < 1) currentPage = 1;
+  // _origBandLabel matches the convention renderCell()'s 'band' case already expects (same field
+  // Favorites rows carry) — reusing that shared function here, rather than hand-rolled markup,
+  // is what makes this table look identical to every other table on the site: same td.freq
+  // amber/blue/green coloring, same live-dot, same info-cell shape.
+  const pageRows = allSubRows
+    .slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+    .map(d => ({ ...d, _origBand: band.id, _origBandLabel: target.bandLabel }));
+  lastRenderedRows = pageRows;
+
+  const hiddenColsSet = new Set();
+  tbody.innerHTML = backRow + pageRows.map((d, i) => {
+    const alwaysOn = isAlwaysOn(d);
+    const active = isActiveNow(d);
+    const extra = {
+      freqClass: alwaysOn ? 'always-on' : (active ? 'active-now' : ''),
+      dot: active ? `<span class="live-dot${alwaysOn ? ' always' : ''}" title="${alwaysOn ? 'Always on air (24h daily)' : 'On air now'}"></span>` : '',
+      noFixedSchedule: d.start === d.end,
+      hiddenCols: hiddenColsSet,
+      bandTag: '', // already have a dedicated Band column here, no need for the inline sub-band pill too
+    };
+    return `<tr data-idx="${i}" tabindex="0">${renderCell('freq', d, extra)}${renderCell('station', d, extra)}${renderCell('band', d, extra)}${renderCell('info', d, extra)}</tr>`;
+  }).join('');
+
+  document.getElementById('rowCount').textContent = pageRows.length;
+  document.getElementById('entriesAvailable').textContent = allSubRows.length;
+  document.getElementById('noResults').style.display = allSubRows.length ? 'none' : 'block';
+  document.getElementById('freqTable').style.display = 'table';
+  document.getElementById('subText').textContent =
+    `${allSubRows.length.toLocaleString()} station${allSubRows.length === 1 ? '' : 's'} on ${String(target.freq)} ${target.freqUnit} (${target.bandLabel}).`;
+  updatePaginationControls(pageRows, allSubRows.length, totalPages);
+}
+
 function buildTableHead(){
   const tr = document.getElementById('tableHeadRow');
   if(currentBand.id === 'airband' && browseStage){
@@ -1208,14 +1337,38 @@ function buildTableHead(){
     ).join('');
     return;
   }
-  const hidden = new Set(computeMobileHiddenColumns(currentBand.columns, currentBand.mobileColumns));
-  tr.innerHTML = currentBand.columns.map(c =>
-    `<th data-key="${COLUMN_DEFS[c].sortKey}" data-col="${c}"${hidden.has(c) ? ' data-mobile-hide' : ''}>${COLUMN_DEFS[c].label}</th>`
-  ).join('');
+  if(currentBand.id === 'identify'){
+    // No data-key on any of these (identify has no user-adjustable sort), which also means the
+    // header-click handler's `if(!key) return;` guard already makes clicking them fully inert.
+    // The drill-down sub-table gets an extra Station column — every row there is a real station
+    // at the same shared frequency, often with near-identical Info text (e.g. several different
+    // airports' "Approach control" all reading alike), so the station name is what actually
+    // distinguishes them. The main search results don't need it: each row there is already a
+    // distinct frequency value, not several stations crammed together.
+    tr.innerHTML = identifyDrillFreq
+      ? `<th data-col="freq">Frequency</th><th data-col="station">Station</th><th data-col="band">Band</th><th data-col="info">Info</th>`
+      : `<th data-col="freq">Frequency</th><th data-col="band">Band</th><th data-col="info">Info</th>`;
+    return;
+  }
+  tr.innerHTML = buildTableHeadHtml(currentBand.columns, currentBand.mobileColumns, computeMobileHiddenColumns);
 }
 
 let sortKey = 'freq', sortDir = 1;
-let lastRenderedRows = [];
+// A generated frequency page (see scripts/build-frequency-pages.js) embeds its own tiny row set
+// as window.__PRERENDERED_ROWS__, in the same order as its pre-rendered <tr data-idx="N"> markup.
+// Seeding lastRenderedRows from it means the tbody click listener already attached below (it's
+// bound at script-load time, not after data loads) resolves clicks correctly from the very first
+// paint — a click during the moment before the real band data finishes loading still opens the
+// right modal, instead of silently doing nothing. On the normal homepage this is always undefined,
+// so this is a no-op there.
+let lastRenderedRows = window.__PRERENDERED_ROWS__ || [];
+// Narrows render() to exactly one frequency when set (see restoreFromUrl's /frequency/ handling).
+// null on the normal homepage — always a no-op filter there.
+let exactFreqFilter = null;
+// When set (to a FREQUENCY_INDEX match with more than one real entry), render() shows a
+// drill-down sub-table of every station at that exact frequency instead of the main Identify
+// search results. Cleared by its own back-row and whenever the Identify band is left.
+let identifyDrillFreq = null;
 const PAGE_SIZE = 100;
 let currentPage = 1;
 
@@ -1261,27 +1414,20 @@ function buildAirbandEntities(countryValue){
   return [...byRegion.values()];
 }
 
-function renderCell(colId, d, extra){
-  const hideAttr = extra.hiddenCols.has(colId) ? ' data-mobile-hide' : '';
-  switch(colId){
-    case 'freq':
-      return `<td class="freq ${extra.freqClass}" data-col="freq"${hideAttr}>${d.freq.toFixed(d.freq % 1 ? 1 : 0)}${extra.bandTag}${extra.dot}</td>`;
-    case 'station': return `<td class="station" data-col="station"${hideAttr}>${d.station}${d.name ? `<span class="station-name">${d.name}</span>` : ''}</td>`;
-    case 'site': return `<td data-col="site"${hideAttr}>${d.site}</td>`;
-    case 'lang': return `<td data-col="lang"${hideAttr}><span class="tag">${d.lang}</span></td>`;
-    case 'target': return `<td data-col="target"${hideAttr}>${d.target}</td>`;
-    case 'class': return `<td data-col="class"${hideAttr}>${d.cls}</td>`;
-    case 'start': return `<td class="time" data-col="start"${hideAttr}>${extra.noFixedSchedule ? '—' : formatTime(d.start)}</td>`;
-    case 'end': return `<td class="time" data-col="end"${hideAttr}>${extra.noFixedSchedule ? '—' : formatTime(d.end)}</td>`;
-    case 'info': return `<td data-col="info"${hideAttr}>${d.info}</td>`;
-    case 'band': return `<td data-col="band"${hideAttr}>${d._origBandLabel}</td>`;
-    default: return '<td></td>';
-  }
-}
-
 function render(){
   if(currentBand.id === 'airband' && browseStage === 'countries'){ renderCountryTable(); return; }
   if(currentBand.id === 'airband' && browseStage === 'entities'){ renderBrowseTable(); return; }
+  if(currentBand.id === 'identify'){
+    // Rebuilt on every render, not just when entering/leaving the drill-down: buildTableHead()
+    // is otherwise only called from state-transition points like setBand(), and neither this
+    // dispatch nor the click handlers that toggle identifyDrillFreq call it themselves — without
+    // this, the header silently goes stale (wrong column count) the moment the two views' headers
+    // stop being identical, which they no longer are now that the sub-table has its own Station
+    // column.
+    buildTableHead();
+    if(identifyDrillFreq){ renderIdentifySubTable(); } else { renderIdentifyTable(); }
+    return;
+  }
   const q = document.getElementById('search').value.trim().toLowerCase();
   const bandF = document.getElementById('bandFilter').value;
   const langF = document.getElementById('langFilter').value;
@@ -1293,7 +1439,7 @@ function render(){
     ? currentRegion
     : null;
 
-  const noSelectionYet = currentBand.requireRegion && !currentRegion;
+  const noSelectionYet = currentBand.requireRegion && !currentRegion && exactFreqFilter === null;
 
   // The haystack string is only built when there's actually a query to match against: for
   // large bands (Mediumwave, Airband) building and lowercasing it for every row on every render,
@@ -1301,13 +1447,14 @@ function render(){
   // when there's nothing to search for.
   let rows = noSelectionYet ? [] : currentBand.data.filter(d => {
     const matchesQ = !q || [d.station, d.name || '', d.site, expandSiteForSearch(d.site), d.lang, d.target, d.cls, d.info].join(' ').toLowerCase().includes(q) || String(d.freq).includes(q);
-    const b = bandFor(d.freq);
+    const b = bandFor(d.freq, currentBand.bands);
     const matchesBand = !bandF || (b && b.name === bandF);
     const matchesLang = !langF || d.lang.split(/,\s*/).includes(langF);
     const matchesClass = !classF || d.cls === classF;
     const matchesCountry = !countryF || d.country === countryF;
     const matchesRegion = !regionObj || matchesSelectedRegion(d, regionObj);
-    return matchesQ && matchesBand && matchesLang && matchesClass && matchesCountry && matchesRegion;
+    const matchesExactFreq = exactFreqFilter === null || d.freq === exactFreqFilter;
+    return matchesQ && matchesBand && matchesLang && matchesClass && matchesCountry && matchesRegion && matchesExactFreq;
   });
 
   const hiddenColsSet = new Set(computeMobileHiddenColumns(currentBand.columns, currentBand.mobileColumns));
@@ -1354,7 +1501,7 @@ function render(){
     if(currentBand.id === 'favorites'){
       extra.bandTag = d._freqUnit ? `<span class="band-tag">${d._freqUnit}</span>` : '';
     } else {
-      const band = bandFor(d.freq);
+      const band = bandFor(d.freq, currentBand.bands);
       extra.bandTag = band ? `<span class="band-tag">${band.name}</span>` : '';
     }
     return `<tr data-idx="${i}" tabindex="0">${currentBand.columns.map(c => renderCell(c, d, extra)).join('')}</tr>`;
@@ -1383,7 +1530,7 @@ function updateSortIndicators(){
 // representative value off a row for that column. Keyed by the same sortKey used for the
 // table's own sort, so the label always matches whatever the user last sorted by.
 const SORT_RANGE_LABELS = {
-  freq:            { label: 'frequency', format: d => d.freq.toFixed(d.freq % 1 ? 1 : 0), unit: true },
+  freq:            { label: 'frequency', format: d => String(d.freq), unit: true },
   station:         { label: 'stations', format: d => d.station },
   site:            { label: 'sites', format: d => d.site },
   lang:            { label: 'languages', format: d => d.lang },
@@ -1404,6 +1551,26 @@ const SORT_RANGE_LABELS = {
 
 function buildPageRangeLabel(pageRows){
   if(!pageRows.length) return '';
+  if(currentBand.id === 'identify' && identifyDrillFreq){
+    // Sub-table rows are real per-station rows (see renderIdentifySubTable), not
+    // FREQUENCY_INDEX entries — they don't carry their own .freqUnit field, and every row here
+    // shares the exact same frequency by definition of the drill-down anyway, so there's no
+    // real "first to last" range to compute; just show that one shared value + unit.
+    return `Showing frequency ${String(identifyDrillFreq.freq)} ${identifyDrillFreq.freqUnit}`;
+  }
+  if(currentBand.id === 'identify'){
+    // Identify results can span multiple bands/units at once (e.g. "108" matches both an
+    // Airband MHz entry and a Mediumwave kHz entry), so there's no single band-level unit to
+    // fall back to here. Each row carries its own full-precision freq + freqUnit, so use those
+    // directly rather than the shared SORT_RANGE_LABELS.freq formatter (which rounds and assumes
+    // one band-wide unit).
+    const first = pageRows[0];
+    const last = pageRows[pageRows.length - 1];
+    const firstStr = `${String(first.freq)} ${first.freqUnit}`;
+    const lastStr = `${String(last.freq)} ${last.freqUnit}`;
+    const range = firstStr === lastStr ? firstStr : `${firstStr} to ${lastStr}`;
+    return `Showing frequency ${range}`;
+  }
   const cfg = SORT_RANGE_LABELS[sortKey] || SORT_RANGE_LABELS.freq;
   const first = cfg.format(pageRows[0]);
   const last = cfg.format(pageRows[pageRows.length - 1]);
@@ -1475,6 +1642,8 @@ function updatePaginationOffset(){
 // rather than whatever page happened to be open before.
 function renderFromPage1(){
   currentPage = 1;
+  exactFreqFilter = null;
+  identifyDrillFreq = null;
   render();
 }
 
@@ -1482,6 +1651,11 @@ document.getElementById('tableHeadRow').addEventListener('click', (e) => {
   const th = e.target.closest('th');
   if(!th) return;
   const key = th.dataset.key;
+  // Columns with no data-key (Identify's headers, none of which are sortable) are inert clicks —
+  // without this, the click still fell through to renderFromPage1() below, which resets
+  // identifyDrillFreq and made clicking "Frequency"/"Band" while drilled into a sub-table behave
+  // exactly like hitting the back row.
+  if(!key) return;
   if(sortKey === key){ sortDir *= -1; } else { sortKey = key; sortDir = 1; }
   renderFromPage1();
 });
@@ -1490,6 +1664,11 @@ let searchDebounceTimer = null;
 document.getElementById('search').addEventListener('input', () => {
   clearTimeout(searchDebounceTimer);
   searchDebounceTimer = setTimeout(renderFromPage1, 250);
+});
+let identifySearchDebounceTimer = null;
+document.getElementById('identifySearchInput').addEventListener('input', () => {
+  clearTimeout(identifySearchDebounceTimer);
+  identifySearchDebounceTimer = setTimeout(renderFromPage1, 250);
 });
 document.getElementById('bandFilter').addEventListener('change', renderFromPage1);
 document.getElementById('langFilter').addEventListener('change', renderFromPage1);
@@ -1549,15 +1728,23 @@ function setBand(id){
   document.getElementById('countrySuffix').hidden = !(band.filters.country || band.filters.region);
   document.getElementById('countrySwitch').hidden = !band.filters.country;
   document.getElementById('forWord').hidden = !(band.filters.country || band.filters.region);
+  document.getElementById('identifySearchWrap').hidden = band.id !== 'identify';
   countryLabel.textContent = currentCountry ? currentCountry.label : '';
   buildCountryMenu();
   updateRegionUI();
   updateSubText();
 
   document.getElementById('search').value = '';
+  document.getElementById('identifySearchInput').value = '';
+  // renderIdentifyTable() is the only render path that overwrites #noResults' text (to explain
+  // the 3-digit minimum); every other band relies on this original static markup. Reset it here,
+  // unconditionally, on every band switch so a prior Identify visit doesn't leak its message into
+  // whatever band is being switched to.
+  document.getElementById('noResults').textContent = 'No frequencies match your filters.';
   sortKey = 'freq'; sortDir = 1;
   currentPage = 1;
   browseStage = null; browseCountryValue = null;
+  identifyDrillFreq = null;
 
   buildBandMenu();
   buildTableHead();
@@ -1570,7 +1757,7 @@ function setBand(id){
     // Airband has no default region (see noDefaultRegion above), so with nothing selected the
     // main page for this band defaults to the country browse table instead of an empty
     // "search an airport" placeholder.
-    if(band.id === 'airband' && !currentRegion){
+    if(band.id === 'airband' && !currentRegion && exactFreqFilter === null){
       enterCountryBrowse();
     } else {
       render();
@@ -1583,11 +1770,22 @@ function setBand(id){
 // Bands with a `lazy: true` flag don't ship their data in the initial page load.
 // Their <script> tag is only injected the first time the user actually picks that
 // band, so people who never touch e.g. Airband never pay for parsing its ~27k rows.
-function loadBandScript(band){
-  document.getElementById('subText').innerHTML = `Loading ${band.label} data…`;
-  document.getElementById('tbody').innerHTML = '';
-  document.getElementById('rowCount').textContent = '0';
-  document.getElementById('noResults').style.display = 'none';
+// `onLoaded` (optional) fires after this band's data is ready, regardless of whether `band` is
+// the currently active one — used by the Identify tab's drill-down to background-load a
+// different band's data while staying on the Identify tab (see renderIdentifySubTable()).
+function loadBandScript(band, onLoaded){
+  // A generated frequency page already has real content pre-rendered (see index.html:1217's
+  // window.__PRERENDERED_ROWS__ comment) — wiping it here would show an empty/loading flash on
+  // exactly the pages this whole feature exists to make load fast. Only clear+show the loading
+  // message for a genuine manual band switch on the normal homepage — and never touch the DOM at
+  // all when `band` isn't the currently active band (a background load must not blank out
+  // whatever's actually on screen for a different band).
+  if(currentBand === band && !window.__PRERENDERED_ROWS__){
+    document.getElementById('subText').innerHTML = `Loading ${band.label} data…`;
+    document.getElementById('tbody').innerHTML = '';
+    document.getElementById('rowCount').textContent = '0';
+    document.getElementById('noResults').style.display = 'none';
+  }
 
   const script = document.createElement('script');
   script.src = band.scriptSrc;
@@ -1601,7 +1799,7 @@ function loadBandScript(band){
       populateFilters();
       // Same country-browse default as setBand(): this is the first-ever load of a lazy band,
       // so browseCountryStats only exists from this point on (built inside band.onReady above).
-      if(band.id === 'airband' && !currentRegion){
+      if(band.id === 'airband' && !currentRegion && exactFreqFilter === null){
         enterCountryBrowse();
       } else {
         render();
@@ -1616,11 +1814,13 @@ function loadBandScript(band){
         if(exists) setRegion(id);
       }
     }
+    if(onLoaded) onLoaded();
   };
   script.onerror = () => {
     if(currentBand === band){
       document.getElementById('subText').textContent = `Couldn't load ${band.label} data. Check your connection and try switching bands again.`;
     }
+    if(onLoaded) onLoaded(new Error(`Failed to load ${band.scriptSrc}`));
   };
   document.body.appendChild(script);
 }
@@ -1749,7 +1949,7 @@ function openDetailModal(row){
   if(band.columns.includes('info')) fields.push(['Days / Info', row.info]);
 
   document.getElementById('modalContent').innerHTML = `
-    <div class="modal-freq ${alwaysOn ? 'always-on' : (active ? 'active-now' : '')}">${row.freq.toFixed(row.freq % 1 ? 1 : 0)}<span class="modal-unit">${unit}</span></div>
+    <div class="modal-freq ${alwaysOn ? 'always-on' : (active ? 'active-now' : '')}">${String(row.freq)}<span class="modal-unit">${unit}</span></div>
     <div class="modal-schedule-wrap" id="modalScheduleWrap">${buildScheduleStatusHtml(row)}</div>
     <h2 class="modal-title">${row.station}${row.name ? `<span class="modal-subtitle">${row.name}</span>` : ''}</h2>
     <p class="modal-desc">${desc}</p>
@@ -1810,6 +2010,15 @@ document.getElementById('tbody').addEventListener('click', (e) => {
   if(countryRow){ enterEntityBrowse(countryRow.dataset.country); return; }
   const browseRow = e.target.closest('tr.browse-row');
   if(browseRow){ selectBrowseEntity(browseRow.dataset.region); return; }
+  const identifyBackRow = e.target.closest('tr.identify-back-row');
+  if(identifyBackRow){ identifyDrillFreq = null; currentPage = 1; render(); return; }
+  const identifyRow = e.target.closest('tr.identify-row');
+  if(identifyRow){
+    const match = rowFromEvent(e);
+    if(match && match.row) openDetailModal(match.row);
+    else if(match){ identifyDrillFreq = match; currentPage = 1; render(); }
+    return;
+  }
   const row = rowFromEvent(e);
   if(row) openDetailModal(row);
 });
@@ -1822,6 +2031,16 @@ document.getElementById('tbody').addEventListener('keydown', (e) => {
   if(countryRow){ e.preventDefault(); enterEntityBrowse(countryRow.dataset.country); return; }
   const browseRow = e.target.closest('tr.browse-row');
   if(browseRow){ e.preventDefault(); selectBrowseEntity(browseRow.dataset.region); return; }
+  const identifyBackRow = e.target.closest('tr.identify-back-row');
+  if(identifyBackRow){ e.preventDefault(); identifyDrillFreq = null; currentPage = 1; render(); return; }
+  const identifyRow = e.target.closest('tr.identify-row');
+  if(identifyRow){
+    e.preventDefault();
+    const match = rowFromEvent(e);
+    if(match && match.row) openDetailModal(match.row);
+    else if(match){ identifyDrillFreq = match; currentPage = 1; render(); }
+    return;
+  }
   const row = rowFromEvent(e);
   if(row){ e.preventDefault(); openDetailModal(row); }
 });
